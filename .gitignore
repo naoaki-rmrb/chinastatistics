@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.DS_Store
+# LibreOffice 一時ファイル
+.~lock.*#
+output/recalc/

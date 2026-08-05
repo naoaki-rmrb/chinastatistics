@@ -1,0 +1,10 @@
+# 取得・実行まわりの設定
+# 時間(sj)の値コード。"LASTn" は直近n期。大きめにして全期間の取得を狙う。
+# 実運用で Actions ログのカバレッジを見て調整すること。
+sj_valuecode_monthly: "LAST120"      # 月次: 直近120か月(=10年)。必要に応じ拡大
+sj_valuecode_quarterly: "LAST80"     # 四半期: 直近80期(=20年)
+
+# NBS へのアクセス作法
+timeout: 30
+max_retries: 4
+sleep: 0.7        # 連続リクエスト間の待機秒（礼儀）

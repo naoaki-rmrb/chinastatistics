@@ -1,0 +1,157 @@
+# =====================================================================
+# 指標定義
+# ---------------------------------------------------------------------
+# 照合キー(match)は NBS 原文の中国語名。resolver がこの名前で
+# 指標ツリーを歩いてコード(zb)を解決するため、中国語名が最重要。
+# name_ja / name_en / unit_* は Excel 表示用のラベル。
+#
+# 各指標は「水準系列(level)」と、それに対応する
+# 「公式前年比系列(official_yoy)」をペアで持つ。
+#   - level        : 値（当月値 or 累计值）
+#   - official_yoy : NBS が直接公表する同比(増速/増长)。無い場合は null。
+# frequency: monthly | quarterly
+# db_national / db_province: 使う NBS データベースコード
+#   monthly   -> hgyd(全国) / fsyd(分省)
+#   quarterly -> hgjd(全国) / fsjd(分省)
+# level_kind: current(当月/当季値) | cumulative(累计值)
+# =====================================================================
+
+databases:
+  monthly:   { national: "hgyd", province: "fsyd" }
+  quarterly: { national: "hgjd", province: "fsjd" }
+
+indicators:
+  # ---------------- GDP（四半期。月次では存在しない）----------------
+  - key: gdp
+    frequency: quarterly
+    level_kind: current
+    name_zh: "地区生产总值/国内生产总值"
+    name_ja: "域内総生産（地域GDP）/ 国内総生産"
+    name_en: "Gross Regional/Domestic Product"
+    unit_zh: "亿元"
+    unit_ja: "億元"
+    unit_en: "100 mil. yuan"
+    level:
+      match_national: ["国内生产总值_累计值", "国内生产总值当季值", "国内生产总值"]
+      match_province: ["地区生产总值_累计值", "地区生产总值当季值", "地区生产总值", "地区生产总值(亿元)"]
+    official_yoy:
+      # GDPは実質同比が基本。名目ではなく「_累计增长/当季同比」を優先。
+      match_national: ["国内生产总值_累计增长", "国内生产总值当季同比", "国内生产总值指数(上年=100)"]
+      match_province: ["地区生产总值_累计增长", "地区生产总值当季同比", "地区生产总值指数(上年=100)"]
+
+  # ---------------- 小売：社会消費財小売総額（当月値）----------------
+  - key: retail
+    frequency: monthly
+    level_kind: current
+    name_zh: "社会消费品零售总额（当月值）"
+    name_ja: "社会消費財小売総額（当月値）"
+    name_en: "Total Retail Sales of Consumer Goods"
+    unit_zh: "亿元"
+    unit_ja: "億元"
+    unit_en: "100 mil. yuan"
+    level:
+      match_national: ["社会消费品零售总额_当月值", "社会消费品零售总额当月值", "社会消费品零售总额"]
+      match_province: ["社会消费品零售总额_当月值", "社会消费品零售总额当月值", "社会消费品零售总额"]
+    official_yoy:
+      match_national: ["社会消费品零售总额_当月同比增长", "社会消费品零售总额_当月增长", "社会消费品零售总额当月同比"]
+      match_province: ["社会消费品零售总额_当月同比增长", "社会消费品零售总额_当月增长", "社会消费品零售总额当月同比"]
+
+  # ---------------- 不動産：開発投資（累計値）----------------
+  - key: re_investment
+    frequency: monthly
+    level_kind: cumulative
+    name_zh: "房地产开发投资完成额（累计值）"
+    name_ja: "不動産開発投資完成額（累計値）"
+    name_en: "Real Estate Development Investment (cumulative)"
+    unit_zh: "亿元"
+    unit_ja: "億元"
+    unit_en: "100 mil. yuan"
+    level:
+      match_national: ["房地产开发投资完成额_累计值", "房地产开发投资_累计值", "房地产开发投资完成额"]
+      match_province: ["房地产开发投资完成额_累计值", "房地产开发投资_累计值", "房地产开发投资完成额"]
+    official_yoy:
+      match_national: ["房地产开发投资完成额_累计增长", "房地产开发投资_累计增长", "房地产开发投资完成额累计同比"]
+      match_province: ["房地产开发投资完成额_累计增长", "房地产开发投资_累计增长", "房地产开发投资完成额累计同比"]
+
+  # ---------------- 不動産：商品房販売面積（累計値）----------------
+  - key: re_sold_area
+    frequency: monthly
+    level_kind: cumulative
+    name_zh: "商品房销售面积（累计值）"
+    name_ja: "商品住宅販売面積（累計値）"
+    name_en: "Floor Space of Commercial Buildings Sold (cumulative)"
+    unit_zh: "万平方米"
+    unit_ja: "万㎡"
+    unit_en: "10,000 sq.m"
+    level:
+      match_national: ["商品房销售面积_累计值", "商品房销售面积"]
+      match_province: ["商品房销售面积_累计值", "商品房销售面积"]
+    official_yoy:
+      match_national: ["商品房销售面积_累计增长", "商品房销售面积累计同比"]
+      match_province: ["商品房销售面积_累计增长", "商品房销售面积累计同比"]
+
+  # ---------------- 不動産：商品房販売額（累計値）----------------
+  - key: re_sold_value
+    frequency: monthly
+    level_kind: cumulative
+    name_zh: "商品房销售额（累计值）"
+    name_ja: "商品住宅販売額（累計値）"
+    name_en: "Sales of Commercial Buildings, value (cumulative)"
+    unit_zh: "亿元"
+    unit_ja: "億元"
+    unit_en: "100 mil. yuan"
+    level:
+      match_national: ["商品房销售额_累计值", "商品房销售额"]
+      match_province: ["商品房销售额_累计值", "商品房销售额"]
+    official_yoy:
+      match_national: ["商品房销售额_累计增长", "商品房销售额累计同比"]
+      match_province: ["商品房销售额_累计增长", "商品房销售额累计同比"]
+
+  # ---------------- 貿易：輸出総額（当月値, NBS系列）----------------
+  - key: exports
+    frequency: monthly
+    level_kind: current
+    name_zh: "出口总额（当月值）"
+    name_ja: "輸出総額（当月値）"
+    name_en: "Total Exports"
+    unit_zh: "亿元/千美元"
+    unit_ja: "億元/千米ドル"
+    unit_en: "100 mil. yuan / 1,000 USD"
+    level:
+      match_national: ["出口总额_当月值", "出口金额_当月值", "出口总额当月值", "出口总额"]
+      match_province: ["出口总额_当月值", "出口金额_当月值", "出口总额当月值", "出口总额"]
+    official_yoy:
+      match_national: ["出口总额_当月同比增长", "出口总额_当月增长", "出口总额当月同比"]
+      match_province: ["出口总额_当月同比增长", "出口总额_当月增长", "出口总额当月同比"]
+
+  # ---------------- 貿易：輸入総額（当月値, NBS系列）----------------
+  - key: imports
+    frequency: monthly
+    level_kind: current
+    name_zh: "进口总额（当月值）"
+    name_ja: "輸入総額（当月値）"
+    name_en: "Total Imports"
+    unit_zh: "亿元/千美元"
+    unit_ja: "億元/千米ドル"
+    unit_en: "100 mil. yuan / 1,000 USD"
+    level:
+      match_national: ["进口总额_当月值", "进口金额_当月值", "进口总额当月值", "进口总额"]
+      match_province: ["进口总额_当月值", "进口金额_当月值", "进口总额当月值", "进口总额"]
+    official_yoy:
+      match_national: ["进口总额_当月同比增长", "进口总额_当月增长", "进口总额当月同比"]
+      match_province: ["进口总额_当月同比增长", "进口总额_当月增长", "进口总额当月同比"]
+
+# =====================================================================
+# 70大中都市 住宅販売価格指数（省別ではなく都市別・構造が異なるため別枠）
+# 実装フェーズ2で専用シートとして取り込む。
+# =====================================================================
+special:
+  - key: house_price_70cities
+    frequency: monthly
+    enabled: false          # フェーズ2で有効化
+    name_zh: "70个大中城市住宅销售价格指数"
+    name_ja: "70大中都市 住宅販売価格指数"
+    name_en: "Sales Price Index of Residential Buildings in 70 Medium & Large Cities"
+    unit_zh: "上月=100 / 上年同月=100"
+    unit_ja: "前月=100 / 前年同月=100"
+    unit_en: "prev month=100 / same month last year=100"
