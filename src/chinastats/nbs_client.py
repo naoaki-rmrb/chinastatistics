@@ -29,21 +29,53 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://data.stats.gov.cn/easyquery.htm"
 HOME_URL = "https://data.stats.gov.cn/"
+# セッション確立用の照会ページ。ここを先に開くと easyquery が通りやすい。
+PRIME_URLS = [
+    "https://data.stats.gov.cn/",
+    "https://data.stats.gov.cn/easyquery.htm?cn=A01",   # 全国年度の入口
+    "https://data.stats.gov.cn/easyquery.htm?cn=E0101",  # 全国月度の入口
+]
 
 DEFAULT_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+        "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
     ),
     "Accept": "application/json, text/javascript, */*; q=0.01",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
     "X-Requested-With": "XMLHttpRequest",
     "Referer": "https://data.stats.gov.cn/easyquery.htm?cn=E0101",
+    "Origin": "https://data.stats.gov.cn",
+    "Connection": "keep-alive",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Dest": "empty",
+    "sec-ch-ua": '"Chromium";v="125", "Not.A/Brand";v="24"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+}
+
+# 照会ページ閲覧時に送るブラウザ的ヘッダ（ドキュメント遷移）
+PRIME_HEADERS = {
+    "Accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,"
+               "image/avif,image/webp,*/*;q=0.8"),
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
 }
 
 
 class NBSError(RuntimeError):
     """NBS API 呼び出しに関する例外。"""
+
+
+def _is_forbidden(exc: Exception) -> bool:
+    """例外が HTTP 403 かどうか。"""
+    resp = getattr(exc, "response", None)
+    return resp is not None and getattr(resp, "status_code", None) == 403
 
 
 class NBSClient:
@@ -77,21 +109,36 @@ class NBSClient:
     # 内部ユーティリティ
     # ------------------------------------------------------------------
     def _prime(self) -> None:
-        """トップページを GET して Cookie を確保する。"""
+        """照会ページを順に開いてセッション Cookie を確立する。
+
+        NBS の easyquery は「先に照会ページを閲覧してセッションを張る」
+        ことを要求するため、トップ→年度入口→月度入口を GET しておく。
+        """
         if self._primed:
             return
+        for url in PRIME_URLS:
+            try:
+                self._request("GET", url, params=None, doc=True)
+            except NBSError as exc:
+                logger.warning("プライミング失敗 %s: %s", url, exc)
         try:
-            self._request("GET", HOME_URL, params=None)
-        except NBSError:
-            # Cookie 取得に失敗しても easyquery 自体は動くことがあるので続行
-            logger.warning("トップページのプライミングに失敗（続行します）")
+            names = [c.name for c in self.session.cookies]
+            logger.info("プライミング後の Cookie: %s", names or "（なし）")
+        except Exception:  # noqa: BLE001
+            pass
         self._primed = True
 
     def _request(
-        self, method: str, url: str, params: dict[str, Any] | None
+        self, method: str, url: str, params: dict[str, Any] | None, doc: bool = False
     ) -> requests.Response:
-        """リトライ＋証明書フォールバック付きの HTTP リクエスト。"""
+        """リトライ＋証明書フォールバック付きの HTTP リクエスト。
+
+        doc=True のときは照会ページ閲覧用のドキュメント系ヘッダを使う。
+        403 のときは応答本文の断片をログに出し（WAF/地域ブロック判別用）、
+        セッションを張り直してから再試行する。
+        """
         last_exc: Exception | None = None
+        headers = dict(PRIME_HEADERS) if doc else None
         for attempt in range(self.max_retries):
             try:
                 with warnings.catch_warnings():
@@ -100,9 +147,13 @@ class NBSClient:
                         method,
                         url,
                         params=params,
+                        headers=headers,
                         timeout=self.timeout,
                         verify=self._verify,
                     )
+                if resp.status_code == 403:
+                    snippet = resp.text[:300].replace("\n", " ") if resp.text else ""
+                    logger.warning("403 応答本文の断片: %s", snippet)
                 resp.raise_for_status()
                 return resp
             except requests.exceptions.SSLError as exc:
@@ -115,6 +166,10 @@ class NBSClient:
                 last_exc = exc
             except requests.exceptions.RequestException as exc:
                 last_exc = exc
+                # 403/セッション切れは張り直して再挑戦（照会ページ以外のとき）
+                if not doc and _is_forbidden(exc):
+                    self._primed = False
+                    self._reprime_light()
 
             backoff = 2 ** attempt
             logger.warning(
@@ -127,6 +182,20 @@ class NBSClient:
             time.sleep(backoff)
 
         raise NBSError(f"リクエストに失敗しました: {url} :: {last_exc}")
+
+    def _reprime_light(self) -> None:
+        """403 後に照会ページを1枚だけ開いてセッションを張り直す。"""
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                self.session.get(
+                    "https://data.stats.gov.cn/easyquery.htm?cn=E0101",
+                    headers=dict(PRIME_HEADERS),
+                    timeout=self.timeout,
+                    verify=self._verify,
+                )
+        except requests.exceptions.RequestException:
+            pass
 
     def _get_json(self, params: dict[str, Any]) -> Any:
         """easyquery を叩いて JSON を返す。"""
