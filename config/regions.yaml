@@ -1,0 +1,40 @@
+# 中国の地区コード（国家統計局の region コードに一致）
+# national = 全国（省ディメンションを持たない全国データベースを使う）
+# provinces = 31省・自治区・直轄市（4直轄市: 北京・上海・天津・重慶 を含む）
+national:
+  code: "000000"     # 便宜上のコード。全国DB(hgyd/hgjd)では reg 指定なしで取得する
+  name_zh: "全国"
+  name_ja: "全国"
+
+provinces:
+  - { code: "110000", name_zh: "北京市",     name_ja: "北京" }
+  - { code: "120000", name_zh: "天津市",     name_ja: "天津" }
+  - { code: "130000", name_zh: "河北省",     name_ja: "河北" }
+  - { code: "140000", name_zh: "山西省",     name_ja: "山西" }
+  - { code: "150000", name_zh: "内蒙古自治区", name_ja: "内モンゴル" }
+  - { code: "210000", name_zh: "辽宁省",     name_ja: "遼寧" }
+  - { code: "220000", name_zh: "吉林省",     name_ja: "吉林" }
+  - { code: "230000", name_zh: "黑龙江省",   name_ja: "黒龍江" }
+  - { code: "310000", name_zh: "上海市",     name_ja: "上海" }
+  - { code: "320000", name_zh: "江苏省",     name_ja: "江蘇" }
+  - { code: "330000", name_zh: "浙江省",     name_ja: "浙江" }
+  - { code: "340000", name_zh: "安徽省",     name_ja: "安徽" }
+  - { code: "350000", name_zh: "福建省",     name_ja: "福建" }
+  - { code: "360000", name_zh: "江西省",     name_ja: "江西" }
+  - { code: "370000", name_zh: "山东省",     name_ja: "山東" }
+  - { code: "410000", name_zh: "河南省",     name_ja: "河南" }
+  - { code: "420000", name_zh: "湖北省",     name_ja: "湖北" }
+  - { code: "430000", name_zh: "湖南省",     name_ja: "湖南" }
+  - { code: "440000", name_zh: "广东省",     name_ja: "広東" }
+  - { code: "450000", name_zh: "广西壮族自治区", name_ja: "広西" }
+  - { code: "460000", name_zh: "海南省",     name_ja: "海南" }
+  - { code: "500000", name_zh: "重庆市",     name_ja: "重慶" }
+  - { code: "510000", name_zh: "四川省",     name_ja: "四川" }
+  - { code: "520000", name_zh: "贵州省",     name_ja: "貴州" }
+  - { code: "530000", name_zh: "云南省",     name_ja: "雲南" }
+  - { code: "540000", name_zh: "西藏自治区", name_ja: "チベット" }
+  - { code: "610000", name_zh: "陕西省",     name_ja: "陝西" }
+  - { code: "620000", name_zh: "甘肃省",     name_ja: "甘粛" }
+  - { code: "630000", name_zh: "青海省",     name_ja: "青海" }
+  - { code: "640000", name_zh: "宁夏回族自治区", name_ja: "寧夏" }
+  - { code: "650000", name_zh: "新疆维吾尔自治区", name_ja: "新疆" }
