@@ -69,6 +69,33 @@ PYTHONPATH=src python -m chinastats.cli demo
 PYTHONPATH=src python -m pytest tests/ -q
 ```
 
+## ネットワーク到達性（重要）／プロキシ設定
+
+NBS のデータポータルは **WAF で中国国外・クラウドの IP を拒否**します
+（403 Forbidden / `reason:UrlACL`）。GitHub Actions のランナー(Azure/米国 IP)も、
+多くの国外 IP も弾かれます。**中国側の IP を経由する必要があります。**
+
+そのため、**中国 IP のプロキシ**を用意し、GitHub の Secret `NBS_PROXY` に登録します。
+
+1. 中国 IP のプロキシを用意（例）
+   - 中国クラウド(阿里云/腾讯云 等)の VPS に `tinyproxy` や `squid` を立てる
+   - もしくは中国 IP を提供するプロキシサービス
+   - 形式: `http://ユーザ:パスワード@ホスト:ポート`（認証なしなら `http://ホスト:ポート`）
+   - HTTPS を CONNECT で中継できること（tinyproxy/squid は既定で可）
+2. リポジトリの **Settings → Secrets and variables → Actions → New repository secret**
+   - Name: `NBS_PROXY`
+   - Secret: 上記のプロキシ URL
+3. これでワークフローが自動でプロキシ経由になり、NBS へ到達できます。
+
+ローカル実行時は環境変数で指定できます:
+```bash
+NBS_PROXY="http://user:pass@host:port" PYTHONPATH=src python -m chinastats.cli build
+```
+
+> メモ: 中国クラウド VPS の IP は概ね通りますが、まれにデータセンター IP も
+> 弾かれることがあります。その場合は住宅系(residential)や中国モバイルの
+> プロキシが確実です。
+
 ## データ源と注意点
 
 - 出所: 国家統計局 (NBS) データポータル `https://data.stats.gov.cn`
