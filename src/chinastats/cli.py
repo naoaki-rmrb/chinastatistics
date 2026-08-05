@@ -88,6 +88,7 @@ def cmd_build(args: argparse.Namespace) -> int:
         timeout=settings.get("timeout", 30),
         max_retries=settings.get("max_retries", 4),
         sleep=settings.get("sleep", 0.6),
+        proxy=os.environ.get("NBS_PROXY") or settings.get("proxy"),
     )
     resolver = Resolver(client=client)
 

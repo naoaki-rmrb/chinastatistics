@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 import warnings
 from typing import Any
@@ -78,6 +79,17 @@ def _is_forbidden(exc: Exception) -> bool:
     return resp is not None and getattr(resp, "status_code", None) == 403
 
 
+def _mask_proxy(proxy: str) -> str:
+    """ログ用に proxy の資格情報を伏せる。"""
+    if "@" in proxy:
+        scheme_sep = proxy.split("://", 1)
+        if len(scheme_sep) == 2:
+            scheme, rest = scheme_sep
+            host = rest.split("@", 1)[1]
+            return f"{scheme}://***@{host}"
+    return proxy
+
+
 class NBSClient:
     """NBS easyquery クライアント。
 
@@ -96,12 +108,20 @@ class NBSClient:
         timeout: float = 30.0,
         max_retries: int = 4,
         sleep: float = 0.6,
+        proxy: str | None = None,
     ) -> None:
         self.timeout = timeout
         self.max_retries = max_retries
         self.sleep = sleep
         self.session = requests.Session()
         self.session.headers.update(DEFAULT_HEADERS)
+        # NBS の WAF は中国国外/クラウドの IP を拒否する(reason:UrlACL)。
+        # 中国側の IP を持つプロキシを指定すると通過できる。
+        # proxy 例: "http://user:pass@host:port"
+        self._proxy = proxy or os.environ.get("NBS_PROXY") or None
+        if self._proxy:
+            self.session.proxies.update({"http": self._proxy, "https": self._proxy})
+            logger.info("NBS プロキシを使用します: %s", _mask_proxy(self._proxy))
         self._verify = True
         self._primed = False
 

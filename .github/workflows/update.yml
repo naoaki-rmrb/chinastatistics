@@ -41,6 +41,10 @@ jobs:
         env:
           PYTHONPATH: src
           ONLY: ${{ github.event.inputs.only }}
+          # NBS の WAF は中国国外/クラウド IP を拒否する(reason:UrlACL)。
+          # 中国側 IP のプロキシを Secret 'NBS_PROXY' に登録すると通過できる。
+          # 例: http://user:pass@host:port  (未設定なら直接続=WAFで失敗する想定)
+          NBS_PROXY: ${{ secrets.NBS_PROXY }}
         run: |
           python -m chinastats.cli build --only "${ONLY}"
 
