@@ -1,10 +1,6 @@
-"""新版NBS API の探索: 指標ツリー・地区・期間・データ構造をダンプする。
+"""新版NBS API 探索: 指標カタログを平坦化して (code, 分類 > 表名, report_id, _id) を全件出力。
 
-エンドポイント(いずれも 200 で公開):
-  queryPbLibCatalogTree?code=1   指標カタログ(ツリー)  code=1:月度? 2:季度? 3:年度?
-  getChooseDaById?id=<reportid>  その表の地区(DA)一覧
-  getHtmlContentTime?id=<reportid> その表の期間(DT)一覧
-  queryMacroReportDataById?REPORTID=..&DA=..&DT=..  データ本体
+code: 1=月度, 2=季度, 3=年度
 """
 
 import json
@@ -18,50 +14,43 @@ H = {
     "Client": "pc",
     "Referer": "https://data.stats.gov.cn/dg/website/page.html",
 }
+FREQ = {1: "月度", 2: "季度", 3: "年度"}
 
 
-def get(path, **params):
-    r = requests.get(BASE + path, params=params, headers=H, timeout=30)
-    print(f"\n### GET {path} params={params} -> {r.status_code} len={len(r.text)}")
-    return r
-
-
-def dump(obj, limit=6000):
-    s = json.dumps(obj, ensure_ascii=False)
-    print(s[:limit] + (" …[truncated]" if len(s) > limit else ""))
-
-
-def walk_tree(code):
-    r = get("queryPbLibCatalogTree", code=code)
-    try:
-        j = r.json()
-    except Exception as e:  # noqa: BLE001
-        print("NOT JSON:", e, r.text[:200])
-        return
-    dump(j, 8000)
-    return j
+def walk(node, path, code, out):
+    name = node.get("name")
+    p = path + [name] if name else path
+    if node.get("type") == "report" and node.get("report_id"):
+        out.append((code, " > ".join(p), node["report_id"], node.get("_id")))
+    for ch in node.get("children") or []:
+        walk(ch, p, code, out)
 
 
 def main():
-    # 1) カタログツリー（頻度別）
     for code in (1, 2, 3):
-        walk_tree(code)
+        r = requests.get(BASE + "queryPbLibCatalogTree", params={"code": code},
+                         headers=H, timeout=30)
+        try:
+            data = r.json().get("data", [])
+        except Exception as e:  # noqa: BLE001
+            print(f"code={code} NOT JSON: {e} {r.text[:150]}")
+            continue
+        out = []
+        for top in data:
+            walk(top, [], code, out)
+        print(f"\n========== code={code} ({FREQ[code]})  reports={len(out)} ==========")
+        for c, path, rid, nid in out:
+            print(f"{FREQ[code]}\t{path}\t{rid}\t{nid}")
 
-    # 2) サンプル report の地区・期間・データ構造
-    sample = "0624a707cf934347ae9e2f6985"  # スクショで見えた REPORTID の先頭
-    # 完全なIDが要るので、まずツリーから拾えた最初のleafで試すのが本筋。
-    # ここでは既知の一つで DA/DT/データ構造の形を確認する。
-    known = "8c256a820cc34fc08eb4726a91ea7401"
-    r = get("getChooseDaById", id=known)
-    try:
-        dump(r.json(), 3000)
-    except Exception as e:  # noqa: BLE001
-        print("da not json", e, r.text[:200])
-    r = get("getHtmlContentTime", id=known)
-    try:
-        dump(r.json(), 3000)
-    except Exception as e:  # noqa: BLE001
-        print("time not json", e, r.text[:200])
+    # サンプル: 正しい id(_id) で地区・期間の構造を確認（月度・各地区固定资产投资）
+    sample_nid = "a9a777a5d510453bb01d509f15629a54"  # 各地区固定资产投资(不含农户) の _id
+    for ep in ("getChooseDaById", "getHtmlContentTime"):
+        r = requests.get(BASE + ep, params={"id": sample_nid}, headers=H, timeout=25)
+        print(f"\n### {ep}?id={sample_nid} -> {r.status_code} len={len(r.text)}")
+        try:
+            print(json.dumps(r.json(), ensure_ascii=False)[:1500])
+        except Exception:  # noqa: BLE001
+            print(r.text[:300])
 
 
 if __name__ == "__main__":
