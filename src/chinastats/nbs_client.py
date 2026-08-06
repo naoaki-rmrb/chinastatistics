@@ -20,11 +20,27 @@ from __future__ import annotations
 
 import logging
 import os
+import socket
 import time
 import warnings
 from typing import Any
 
 import requests
+
+_ORIG_GETADDRINFO = socket.getaddrinfo
+
+
+def force_ipv4() -> None:
+    """名前解決を IPv4(AF_INET) のみに強制する。
+
+    中国越境 VPN は IPv4 だけ中国側に通し、IPv6 は素通し(リーク)する
+    ことが多い。IPv6 で出ると NBS の WAF に国外 IP として弾かれるため、
+    IPv4 に固定して VPN のトンネルを確実に通す。
+    """
+    def _ipv4_only(host, port, family=0, type=0, proto=0, flags=0):  # noqa: A002
+        return _ORIG_GETADDRINFO(host, port, socket.AF_INET, type, proto, flags)
+
+    socket.getaddrinfo = _ipv4_only
 
 logger = logging.getLogger(__name__)
 
@@ -109,10 +125,15 @@ class NBSClient:
         max_retries: int = 4,
         sleep: float = 0.6,
         proxy: str | None = None,
+        ipv4_only: bool = True,
     ) -> None:
         self.timeout = timeout
         self.max_retries = max_retries
         self.sleep = sleep
+        # IPv6 リーク対策: 既定で IPv4 に固定（環境変数 NBS_ALLOW_IPV6=1 で無効化）
+        if ipv4_only and os.environ.get("NBS_ALLOW_IPV6") != "1":
+            force_ipv4()
+            logger.info("名前解決を IPv4 に固定しました（IPv6リーク対策）")
         self.session = requests.Session()
         self.session.headers.update(DEFAULT_HEADERS)
         # NBS の WAF は中国国外/クラウドの IP を拒否する(reason:UrlACL)。
