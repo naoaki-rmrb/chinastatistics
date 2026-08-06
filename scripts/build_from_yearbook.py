@@ -206,6 +206,64 @@ def parse_national_timeseries(b: bytes, theme: str, series: str) -> list[dict]:
     return recs
 
 
+def parse_percapita_gdp(b: bytes) -> list[dict]:
+    """3-9 の 人均地区生产总值(元) 列(col13) を省別に抽出。"""
+    df = read_xls(b)
+    recs = []
+    for i in range(df.shape[0]):
+        code = norm_region(df.iat[i, 0])
+        if not code:
+            continue
+        v = _num(df.iat[i, 14]) if df.shape[1] > 14 else None  # (元) 人均列
+        if v is not None and v > 1000:  # 人均は元単位で大きい値
+            recs.append(dict(theme="gdp_percapita", region_code=code, year=2022,
+                             series="人均地区生产总值(元)", value=v, yoy=None))
+    return recs
+
+
+def parse_overview(b: bytes, theme: str, value_col: int) -> list[dict]:
+    """全国推移表: col0=年(範囲文字列可), value_col=金額。戻り: {theme,year_label,value}"""
+    df = read_xls(b)
+    recs = []
+    for i in range(df.shape[0]):
+        y = df.iat[i, 0]
+        if not isinstance(y, (str, int, float)):
+            continue
+        ylabel = str(y).strip()
+        if not re.match(r"^\d{4}", ylabel):
+            continue
+        val = _num(df.iat[i, value_col])
+        if val is not None:
+            recs.append(dict(theme=theme, year_label=ylabel, value=val))
+    return recs
+
+
+COUNTRY_SKIP = {"国别(地区)", "国家(地区)", "单位:万美元", "单位：万美元"}
+
+
+def parse_country(b: bytes, dataset: str, year_cols: dict) -> list[dict]:
+    """国・地域別表: col0=国名(#や大陸小計含む), year_cols={列:ラベル}。"""
+    df = read_xls(b)
+    recs = []
+    for i in range(df.shape[0]):
+        name = df.iat[i, 0]
+        if not isinstance(name, str):
+            continue
+        cn = re.sub(r"\s", "", name).lstrip("#").strip()
+        if not cn or cn in COUNTRY_SKIP:
+            continue
+        # 表タイトル行(例「11-14按国别…」)や見出しを除外
+        if re.match(r"^\d", cn) or "直接投资" in cn or "单位" in cn:
+            continue
+        for col, label in year_cols.items():
+            if col >= df.shape[1]:
+                continue
+            val = _num(df.iat[i, col])
+            if val is not None:
+                recs.append(dict(dataset=dataset, country=cn, period=label, value=val))
+    return recs
+
+
 # ---------------------------------------------------------------------
 # Excel 出力（省別は地区を行に、年を列に）
 # ---------------------------------------------------------------------
@@ -239,10 +297,35 @@ def build(zip_path: str, out_path: str) -> None:
     tbl = find(files, "19-11_按用途分商品房销售额")
     if tbl is not None:
         recs += parse_national_timeseries(tbl, "re_sold_value", "商品房销售额")
+    # 一人当たりGDP（省別）
+    tbl = find(files, "3-9_地区生产总值")
+    if tbl is not None:
+        recs += parse_percapita_gdp(tbl)
+
+    # 投資の全国推移（対中FDI / 対外ODI）
+    overview: list[dict] = []
+    tbl = find(files, "11-13_外商直接投资情况")
+    if tbl is not None:
+        overview += parse_overview(tbl, "fdi_in", value_col=2)   # 实际使用外资(亿美元)
+    tbl = find(files, "11-18_对外直接投资")
+    if tbl is not None:
+        overview += parse_overview(tbl, "odi_out", value_col=1)  # 対外投資流量(亿美元)
+
+    # 投資の国・地域別（どこから対中FDI / どこへ対外ODI）
+    country: list[dict] = []
+    tbl = find(files, "11-14_按国别")
+    if tbl is not None:
+        country += parse_country(tbl, "対中投資FDI(国別)", {1: "2021", 2: "2022"})
+    tbl = find(files, "11-19_按主要国别")
+    if tbl is not None:
+        country += parse_country(tbl, "対外投資ODI(国別)",
+                                 {1: "2020流量", 2: "2021流量", 3: "2021末存量"})
 
     df = pd.DataFrame.from_records(recs)
     if df.empty:
         raise SystemExit("抽出できたデータがありません。")
+    df_ov = pd.DataFrame.from_records(overview)
+    df_cty = pd.DataFrame.from_records(country)
 
     from openpyxl import Workbook
     wb = Workbook()
@@ -265,7 +348,8 @@ def build(zip_path: str, out_path: str) -> None:
 
     # テーマごとにシート（地区×年 の 値、YoY があれば併記）
     theme_titles = {
-        "gdp": "GDP 地区生产总值", "retail": "小売 社会消费品零售总额",
+        "gdp": "GDP 地区生产总值", "gdp_percapita": "一人当たりGDP 人均",
+        "retail": "小売 社会消费品零售总额",
         "trade": "貿易 货物进出口", "re_investment": "不動産 开发完成投资",
         "re_sold_area": "全国 商品房销售面积", "re_sold_value": "全国 商品房销售额",
     }
@@ -276,9 +360,71 @@ def build(zip_path: str, out_path: str) -> None:
         ws = wb.create_sheet(title[:31])
         _write_theme(ws, title, sub)
 
+    # 投資の全国推移（年×金額）
+    if not df_ov.empty:
+        ov_titles = {"fdi_in": "対中投資FDI(全国推移)", "odi_out": "対外投資ODI(全国推移)"}
+        for theme, title in ov_titles.items():
+            sub = df_ov[df_ov["theme"] == theme]
+            if sub.empty:
+                continue
+            ws = wb.create_sheet(title[:31])
+            _write_overview(ws, title, sub)
+
+    # 投資の国・地域別（国×期間）
+    if not df_cty.empty:
+        for dataset in df_cty["dataset"].unique():
+            sub = df_cty[df_cty["dataset"] == dataset]
+            ws = wb.create_sheet(str(dataset)[:31])
+            _write_country(ws, str(dataset), sub)
+
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     wb.save(out_path)
-    print(f"生成: {out_path}  （{len(df)} レコード, テーマ {df['theme'].nunique()}）")
+    print(f"生成: {out_path}  （省別{len(df)}, 推移{len(df_ov)}, 国別{len(df_cty)} レコード）")
+
+
+def _write_overview(ws, title, sub) -> None:
+    """全国推移: 年ラベル×金額(亿美元)。"""
+    ws.cell(1, 1, title).font = TITLE_FONT
+    ws.cell(2, 1, "単位: 億米ドル / 100 mil. USD").font = Font(size=9, color="595959")
+    ws.cell(4, 1, "年 / Year").font = HDR_FONT
+    ws.cell(4, 1).fill = HDR_FILL
+    ws.cell(4, 2, "金額").font = HDR_FONT
+    ws.cell(4, 2).fill = HDR_FILL
+    r = 5
+    for row in sub.itertuples(index=False):
+        ws.cell(r, 1, row.year_label)
+        ws.cell(r, 2, float(row.value)).number_format = "#,##0.0"
+        r += 1
+    ws.freeze_panes = "A5"
+    ws.column_dimensions["A"].width = 14
+    ws.column_dimensions["B"].width = 14
+
+
+def _write_country(ws, title, sub) -> None:
+    """国・地域別: 国を行、期間を列。"""
+    ws.cell(1, 1, title).font = TITLE_FONT
+    ws.cell(2, 1, "単位: 万米ドル / 10,000 USD").font = Font(size=9, color="595959")
+    periods = list(dict.fromkeys(sub["period"].tolist()))
+    ws.cell(4, 1, "国・地域 / Country").font = HDR_FONT
+    ws.cell(4, 1).fill = HDR_FILL
+    for j, p in enumerate(periods):
+        cell = ws.cell(4, 2 + j, p)
+        cell.font = HDR_FONT
+        cell.fill = HDR_FILL
+        cell.alignment = CENTER
+    countries = list(dict.fromkeys(sub["country"].tolist()))
+    r = 5
+    for cn in countries:
+        ws.cell(r, 1, cn)
+        for j, p in enumerate(periods):
+            rows = sub[(sub.country == cn) & (sub.period == p)]
+            if not rows.empty:
+                ws.cell(r, 2 + j, float(rows.iloc[0]["value"])).number_format = "#,##0"
+        r += 1
+    ws.freeze_panes = "B5"
+    ws.column_dimensions["A"].width = 18
+    for j in range(len(periods)):
+        ws.column_dimensions[get_column_letter(2 + j)].width = 14
 
 
 def _write_theme(ws, title, sub) -> None:
