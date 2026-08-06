@@ -1,5 +1,18 @@
 # chinastatistics — 中国 全国・省別 経済指標の自動収集
 
+> **稼働中（VPN不要）**: 新版NBSデータポータル(dg) の公開API
+> `queryMacroReportDataById` を用い、GitHub Actions から毎月自動で
+> 全国＋31省の月次データを取得し `output/china_indicators.xlsx` を更新します。
+> 旧 easyquery.htm は WAF(reason:UrlACL) で国外/クラウドIPを拒否するため使用しません。
+>
+> - 取得エンジン: `src/chinastats/dg_client.py` + `dg_fetch.py`
+> - 指標定義: `config/indicators_dg.yaml`（report_id）
+> - 実行: `PYTHONPATH=src python -m chinastats.cli build-dg`
+> - 自動化: `.github/workflows/build-dg.yml`（毎月20日）
+> - 値・公式前年比(同比)・計算前年比・乖離・前月比を併記
+
+---
+
 中国の**全国**および**31省・自治区・直轄市**（北京・上海・天津・重慶の4直轄市を含む）の
 経済指標を国家統計局(NBS)から毎月自動取得し、**前年比・前月比付きの Excel** を
 生成・更新するツールです。GitHub Actions で毎月自動実行され、成果物を
