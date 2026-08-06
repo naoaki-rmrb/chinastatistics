@@ -15,4 +15,4 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install requests
-      - run: python scripts/test_new_api.py
+      - run: python scripts/discover_new.py
