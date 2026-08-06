@@ -1,0 +1,111 @@
+# =====================================================================
+# 新版NBSポータル(dg) 指標定義
+#   report_id: queryMacroReportDataById の REPORTID
+#   freq: monthly(月度) / quarterly(季度) / annual(年度)
+#   scope: national(全国のみ) / provincial(各地区=全国+31省が1回で返る)
+#         / city(70都市など)
+#   target: 抽出する指標名(EK_NAME と一致する行を採用。内訳は KJ1_NAME で判別)
+#   level_kind: current(当月/本期) / cumulative(本期累计)
+#   値は行の DU_NAME!='%' を level、DP_NAME に「同比」を含む行を公式YoY とする。
+# =====================================================================
+
+settings:
+  monthly_from: "201001"     # 月次バックフィル開始 (YYYYMM)
+  quarterly_from: "2011"     # 四半期バックフィル開始 (年)
+  sleep: 0.2
+
+indicators:
+  # ---- 小売(全国・月次): 値＋公式同比 ----
+  - key: retail
+    freq: monthly
+    scope: national
+    report_id: "39b254feba05423d8ba72c28f633f343"
+    target: "社会消费品零售总额"
+    level_kind: current
+    name_zh: "社会消费品零售总额"
+    name_ja: "社会消費財小売総額"
+    name_en: "Total Retail Sales of Consumer Goods"
+    unit_zh: "亿元"
+    unit_ja: "億元"
+    unit_en: "100 mil. yuan"
+
+  # ---- 不動産開発投資(各地区・月次・累計): 値＋公式同比 ----
+  - key: re_investment
+    freq: monthly
+    scope: provincial
+    report_id: "01e95051738d45cb910220aea38b0b4b"
+    target: "房地产开发投资完成额"
+    level_kind: cumulative
+    name_zh: "房地产开发投资完成额（累计）"
+    name_ja: "不動産開発投資完成額（累計）"
+    name_en: "Real Estate Development Investment (cumulative)"
+    unit_zh: "亿元"
+    unit_ja: "億元"
+    unit_en: "100 mil. yuan"
+
+  # ---- 固定資産投資(各地区・月次・累計): 省別は同比のみ(水準非公表) ----
+  - key: fai
+    freq: monthly
+    scope: provincial
+    report_id: "72375b5a0dcf421e8fddbb51fd3a0192"
+    target: "固定资产投资"
+    level_kind: cumulative
+    name_zh: "固定资产投资（不含农户・累计）"
+    name_ja: "固定資産投資（農家除く・累計）"
+    name_en: "Fixed Asset Investment (excl. rural households, cumulative)"
+    unit_zh: "万元"
+    unit_ja: "万元"
+    unit_en: "10,000 yuan"
+
+  # ---- 商品房販売面積(各地区・月次) ----
+  - key: re_sold_area
+    freq: monthly
+    scope: provincial
+    report_id: "966d64c02ebe4546901722e7c478372b"
+    target: "商品房销售面积"
+    level_kind: cumulative
+    name_zh: "商品房销售面积（累计）"
+    name_ja: "商品住宅販売面積（累計）"
+    name_en: "Floor Space of Commercial Buildings Sold (cumulative)"
+    unit_zh: "万平方米"
+    unit_ja: "万㎡"
+    unit_en: "10,000 sq.m"
+
+  # ---- 各地区工業増加値増速(各地区・月次・同比のみ) ----
+  - key: industry_va
+    freq: monthly
+    scope: provincial
+    report_id: "44e3145d24bc4e7ca09eef6023a2aa2f"
+    target: "工业增加值"
+    level_kind: current
+    name_zh: "规模以上工业增加值（増速）"
+    name_ja: "一定規模以上工業付加価値（伸び率）"
+    name_en: "Value Added of Industry above designated size (growth)"
+    unit_zh: "%"
+    unit_ja: "%"
+    unit_en: "%"
+
+  # ---- GDP 地区生产总值(各地区・四半期): DT形式確定後に有効化 ----
+  - key: gdp
+    freq: quarterly
+    scope: provincial
+    report_id: "b4241c76593e4f01b2364c01d698f9c6"
+    target: "地区生产总值"
+    level_kind: cumulative
+    enabled: false            # 四半期DT形式を確定してから true に
+    name_zh: "地区生产总值"
+    name_ja: "域内総生産（地域GDP）"
+    name_en: "Gross Regional Product"
+    unit_zh: "亿元"
+    unit_ja: "億元"
+    unit_en: "100 mil. yuan"
+
+# 70大中都市 住宅販売価格指数（都市別・別構造）: 専用処理
+special:
+  - key: house_price_70
+    freq: monthly
+    scope: city
+    report_id: "96d37aa633164cf0a177432d150c4711"
+    name_zh: "70个大中城市住宅销售价格指数"
+    name_ja: "70大中都市 住宅販売価格指数"
+    name_en: "Sales Price Index of Residential Buildings, 70 Cities"
