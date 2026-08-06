@@ -21,6 +21,9 @@ import sys
 import zipfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from i18n_names import COUNTRY_I18N, GOODS_I18N, GOODS_FRAGMENTS  # noqa: E402
+
 import pandas as pd
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
@@ -96,6 +99,39 @@ def ser_label(zh: str) -> str:
     """系列名を 中文/日本語/English の3行で返す（未登録は中文のみ）。"""
     ja, en = SERIES_I18N.get(zh, ("", ""))
     parts = [zh]
+    if ja:
+        parts.append(ja)
+    if en:
+        parts.append(en)
+    return "\n".join(parts)
+
+
+def country_label(zh: str) -> str:
+    """国・地域名を 中文/日本語/English の3行で返す（未登録は中文のみ）。"""
+    ja, en = COUNTRY_I18N.get(zh, ("", ""))
+    parts = [zh]
+    if ja:
+        parts.append(ja)
+    if en:
+        parts.append(en)
+    return "\n".join(parts)
+
+
+_UNIT_RE = re.compile(
+    r"\s*\((万吨|吨|万台|台|万辆|辆|万只|只|万件|件|亿个|万个|个|万美元|万元|"
+    r"千克|吨标准煤|平方米|万平方米|立方米|万立方米|千瓦时|亿千瓦时|万升|艘|架|"
+    r"亿块|万块|万条|万套|万支|万张|万双|万米|万立方|吨标煤)\)\s*$"
+)
+
+
+def goods_label(item: str) -> str:
+    """品目名を 中文(単位)/日本語/English の3行で返す（未登録は中文のみ）。"""
+    m = _UNIT_RE.search(item)
+    unit = m.group(0).strip() if m else ""
+    base = _UNIT_RE.sub("", item).strip()
+    ja, en = GOODS_I18N.get(base, ("", ""))
+    zh_line = f"{base}{(' ' + unit) if unit else ''}"
+    parts = [zh_line]
     if ja:
         parts.append(ja)
     if en:
@@ -311,8 +347,10 @@ def parse_country(b: bytes, dataset: str, year_cols: dict) -> list[dict]:
         cn = re.sub(r"\s", "", name).lstrip("#").strip()
         if not cn or cn in COUNTRY_SKIP:
             continue
-        # 表タイトル行(例「11-14按国别…」)や見出しを除外
+        # 表タイトル行(例「11-14按国别…」)・脚注・見出しを除外
         if re.match(r"^\d", cn) or "直接投资" in cn or "单位" in cn:
+            continue
+        if cn.startswith("注") or len(cn) > 14:
             continue
         for col, label in year_cols.items():
             if col >= df.shape[1]:
@@ -376,6 +414,10 @@ def parse_goods(b: bytes, dataset: str) -> list[dict]:
             continue
         nm = re.sub(r"\s+", " ", name).strip()
         if not nm or nm.startswith("11-") or nm.replace(" ", "") in ("品名",):
+            continue
+        # 折返し断片・継続行(末尾が読点/及 等)は除外
+        base_chk = _UNIT_RE.sub("", nm).strip()
+        if base_chk in GOODS_FRAGMENTS or base_chk.endswith(("、", "，", "及", "，", ",")):
             continue
         qty = _num(df.iat[i, 1])
         cny = _num(df.iat[i, 2])
@@ -577,7 +619,7 @@ def _write_goods(ws, title, sub) -> None:
     ws.cell(1, 1, title).font = TITLE_FONT
     ws.cell(2, 1, "数量の単位は品目名に付記。金額は万元人民币/万美元。").font = \
         Font(size=9, color="595959")
-    heads = ["品名 / Item", "数量 Qty", "金額(万元)", "金額(万美元)"]
+    heads = ["品名\n品目\nItem", "数量 Qty", "金額(万元)", "金額(万美元)"]
     for c, h in enumerate(heads, 1):
         cell = ws.cell(4, c, h)
         cell.font = HDR_FONT
@@ -585,7 +627,8 @@ def _write_goods(ws, title, sub) -> None:
         cell.alignment = CENTER
     r = 5
     for row in sub.itertuples(index=False):
-        ws.cell(r, 1, row.item)
+        cell = ws.cell(r, 1, goods_label(row.item))
+        cell.alignment = Alignment(vertical="center", wrap_text=True)
         if pd.notna(row.qty):
             ws.cell(r, 2, float(row.qty)).number_format = "#,##0"
         if pd.notna(row.cny):
@@ -632,14 +675,15 @@ def _write_country(ws, title, sub) -> None:
     countries = list(dict.fromkeys(sub["country"].tolist()))
     r = 5
     for cn in countries:
-        ws.cell(r, 1, cn)
+        cell = ws.cell(r, 1, country_label(cn))
+        cell.alignment = Alignment(vertical="center", wrap_text=True)
         for j, p in enumerate(periods):
             rows = sub[(sub.country == cn) & (sub.period == p)]
             if not rows.empty:
                 ws.cell(r, 2 + j, float(rows.iloc[0]["value"])).number_format = "#,##0"
         r += 1
     ws.freeze_panes = "B5"
-    ws.column_dimensions["A"].width = 18
+    ws.column_dimensions["A"].width = 22
     for j in range(len(periods)):
         ws.column_dimensions[get_column_letter(2 + j)].width = 14
 
