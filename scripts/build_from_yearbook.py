@@ -264,6 +264,69 @@ def parse_country(b: bytes, dataset: str, year_cols: dict) -> list[dict]:
     return recs
 
 
+GDP_IND_COLS = {
+    2: "第一产业", 3: "第二产业", 4: "第三产业",
+    5: "农林牧渔业", 6: "工业", 7: "建筑业", 8: "批发和零售业",
+    9: "交通运输仓储和邮政业", 10: "住宿和餐饮业", 11: "金融业",
+    12: "房地产业", 13: "其他",
+}
+
+
+def parse_gdp_by_industry(b: bytes) -> list[dict]:
+    """3-9 から省別の産業別付加価値(億元, 2022)を抽出。"""
+    df = read_xls(b)
+    recs = []
+    for i in range(df.shape[0]):
+        code = norm_region(df.iat[i, 0])
+        if not code:
+            continue
+        for col, name in GDP_IND_COLS.items():
+            if col >= df.shape[1]:
+                continue
+            v = _num(df.iat[i, col])
+            if v is not None:
+                recs.append(dict(theme="gdp_industry", region_code=code, year=2022,
+                                 series=name, value=v, yoy=None))
+    return recs
+
+
+def parse_timeseries_multi(b: bytes, theme: str, colmap: dict) -> list[dict]:
+    """全国推移: col0=年, colmap={列:系列名}。戻り {theme,year,series,value}"""
+    df = read_xls(b)
+    recs = []
+    for i in range(df.shape[0]):
+        y = _num(df.iat[i, 0])
+        if y is None or not (1978 <= y <= 2100):
+            continue
+        for col, name in colmap.items():
+            if col >= df.shape[1]:
+                continue
+            v = _num(df.iat[i, col])
+            if v is not None:
+                recs.append(dict(theme=theme, year=int(y), series=name, value=v))
+    return recs
+
+
+def parse_goods(b: bytes, dataset: str) -> list[dict]:
+    """11-6/11-7: col0=品名(＋単位), col1=数量, col2=金额万元, col3=金额万美元。"""
+    df = read_xls(b)
+    recs = []
+    for i in range(df.shape[0]):
+        name = df.iat[i, 0]
+        if not isinstance(name, str):
+            continue
+        nm = re.sub(r"\s+", " ", name).strip()
+        if not nm or nm.startswith("11-") or nm.replace(" ", "") in ("品名",):
+            continue
+        qty = _num(df.iat[i, 1])
+        cny = _num(df.iat[i, 2])
+        usd = _num(df.iat[i, 3]) if df.shape[1] > 3 else None
+        if qty is None and cny is None and usd is None:
+            continue
+        recs.append(dict(dataset=dataset, item=nm, qty=qty, cny=cny, usd=usd))
+    return recs
+
+
 # ---------------------------------------------------------------------
 # Excel 出力（省別は地区を行に、年を列に）
 # ---------------------------------------------------------------------
@@ -297,10 +360,11 @@ def build(zip_path: str, out_path: str) -> None:
     tbl = find(files, "19-11_按用途分商品房销售额")
     if tbl is not None:
         recs += parse_national_timeseries(tbl, "re_sold_value", "商品房销售额")
-    # 一人当たりGDP（省別）
+    # 一人当たりGDP（省別）・GDP産業別（省別）
     tbl = find(files, "3-9_地区生产总值")
     if tbl is not None:
         recs += parse_percapita_gdp(tbl)
+        recs += parse_gdp_by_industry(tbl)
 
     # 投資の全国推移（対中FDI / 対外ODI）
     overview: list[dict] = []
@@ -321,11 +385,34 @@ def build(zip_path: str, out_path: str) -> None:
         country += parse_country(tbl, "対外投資ODI(国別)",
                                  {1: "2020流量", 2: "2021流量", 3: "2021末存量"})
 
+    # 固定資産投資（全国推移・産業別）と 貨物別輸出入
+    ts_multi: list[dict] = []
+    tbl = find(files, "10-1_全社会固定资产投资")
+    if tbl is not None:
+        ts_multi += parse_timeseries_multi(tbl, "固定資産投資(全国推移)", {
+            1: "全社会固定资产投资(亿元)", 2: "全社会FAI 比上年增长(%)",
+            3: "房地产开发投资(亿元)", 4: "房地产开发投资 比上年增长(%)"})
+    tbl = find(files, "10-4_三次产业固定资产投资")
+    if tbl is not None:
+        ts_multi += parse_timeseries_multi(tbl, "固定資産投資(産業別・推移)", {
+            1: "全部投资(亿元)", 2: "第一产业(亿元)",
+            3: "第二产业(亿元)", 4: "第三产业(亿元)"})
+
+    goods: list[dict] = []
+    tbl = find(files, "11-6_出口主要货物数量和金额")
+    if tbl is not None:
+        goods += parse_goods(tbl, "輸出 貨物別")
+    tbl = find(files, "11-7_进口主要货物数量和金额")
+    if tbl is not None:
+        goods += parse_goods(tbl, "輸入 貨物別")
+
     df = pd.DataFrame.from_records(recs)
     if df.empty:
         raise SystemExit("抽出できたデータがありません。")
     df_ov = pd.DataFrame.from_records(overview)
     df_cty = pd.DataFrame.from_records(country)
+    df_ts = pd.DataFrame.from_records(ts_multi)
+    df_goods = pd.DataFrame.from_records(goods)
 
     from openpyxl import Workbook
     wb = Workbook()
@@ -349,6 +436,7 @@ def build(zip_path: str, out_path: str) -> None:
     # テーマごとにシート（地区×年 の 値、YoY があれば併記）
     theme_titles = {
         "gdp": "GDP 地区生产总值", "gdp_percapita": "一人当たりGDP 人均",
+        "gdp_industry": "GDP産業別(省別)",
         "retail": "小売 社会消费品零售总额",
         "trade": "貿易 货物进出口", "re_investment": "不動産 开发完成投资",
         "re_sold_area": "全国 商品房销售面积", "re_sold_value": "全国 商品房销售额",
@@ -377,9 +465,78 @@ def build(zip_path: str, out_path: str) -> None:
             ws = wb.create_sheet(str(dataset)[:31])
             _write_country(ws, str(dataset), sub)
 
+    # 固定資産投資（全国推移・産業別）: 年×系列
+    if not df_ts.empty:
+        for theme in df_ts["theme"].unique():
+            sub = df_ts[df_ts["theme"] == theme]
+            ws = wb.create_sheet(str(theme)[:31])
+            _write_timeseries(ws, str(theme), sub)
+
+    # 貨物別輸出入: 品目×[数量/金額]
+    if not df_goods.empty:
+        for dataset in df_goods["dataset"].unique():
+            sub = df_goods[df_goods["dataset"] == dataset]
+            ws = wb.create_sheet(str(dataset)[:31])
+            _write_goods(ws, str(dataset), sub)
+
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     wb.save(out_path)
-    print(f"生成: {out_path}  （省別{len(df)}, 推移{len(df_ov)}, 国別{len(df_cty)} レコード）")
+    print(f"生成: {out_path}  （省別{len(df)}, 推移{len(df_ov)}, 国別{len(df_cty)}, "
+          f"FAI{len(df_ts)}, 貨物{len(df_goods)} レコード）")
+
+
+def _write_timeseries(ws, title, sub) -> None:
+    """全国推移(多系列): 年を行、系列を列。"""
+    ws.cell(1, 1, title).font = TITLE_FONT
+    series = list(dict.fromkeys(sub["series"].tolist()))
+    ws.cell(3, 1, "年 / Year").font = HDR_FONT
+    ws.cell(3, 1).fill = HDR_FILL
+    for j, s in enumerate(series):
+        cell = ws.cell(3, 2 + j, s)
+        cell.font = HDR_FONT
+        cell.fill = HDR_FILL
+        cell.alignment = CENTER
+    years = sorted(sub["year"].unique().tolist())
+    r = 4
+    for y in years:
+        ws.cell(r, 1, y)
+        for j, s in enumerate(series):
+            rows = sub[(sub.year == y) & (sub.series == s)]
+            if not rows.empty:
+                cell = ws.cell(r, 2 + j, float(rows.iloc[0]["value"]))
+                cell.number_format = '0.0"%"' if "增长" in s or "%" in s else "#,##0.0"
+        r += 1
+    ws.freeze_panes = "B4"
+    ws.column_dimensions["A"].width = 8
+    for j in range(len(series)):
+        ws.column_dimensions[get_column_letter(2 + j)].width = 20
+
+
+def _write_goods(ws, title, sub) -> None:
+    """貨物別: 品目を行、[数量/金額(万元)/金額(万美元)]。"""
+    ws.cell(1, 1, title).font = TITLE_FONT
+    ws.cell(2, 1, "数量の単位は品目名に付記。金額は万元人民币/万美元。").font = \
+        Font(size=9, color="595959")
+    heads = ["品名 / Item", "数量 Qty", "金額(万元)", "金額(万美元)"]
+    for c, h in enumerate(heads, 1):
+        cell = ws.cell(4, c, h)
+        cell.font = HDR_FONT
+        cell.fill = HDR_FILL
+        cell.alignment = CENTER
+    r = 5
+    for row in sub.itertuples(index=False):
+        ws.cell(r, 1, row.item)
+        if pd.notna(row.qty):
+            ws.cell(r, 2, float(row.qty)).number_format = "#,##0"
+        if pd.notna(row.cny):
+            ws.cell(r, 3, float(row.cny)).number_format = "#,##0"
+        if pd.notna(row.usd):
+            ws.cell(r, 4, float(row.usd)).number_format = "#,##0"
+        r += 1
+    ws.freeze_panes = "B5"
+    ws.column_dimensions["A"].width = 26
+    for c in "BCD":
+        ws.column_dimensions[c].width = 14
 
 
 def _write_overview(ws, title, sub) -> None:
