@@ -25,23 +25,82 @@ import pandas as pd
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-# 省の短縮名(年鑑表記) -> (code, 日本語)
+# 省の短縮名(年鑑表記) -> (中文, code, 日本語, English)
 REGIONS = [
-    ("全国", "000000", "全国"), ("北京", "110000", "北京"), ("天津", "120000", "天津"),
-    ("河北", "130000", "河北"), ("山西", "140000", "山西"), ("内蒙古", "150000", "内モンゴル"),
-    ("辽宁", "210000", "遼寧"), ("吉林", "220000", "吉林"), ("黑龙江", "230000", "黒龍江"),
-    ("上海", "310000", "上海"), ("江苏", "320000", "江蘇"), ("浙江", "330000", "浙江"),
-    ("安徽", "340000", "安徽"), ("福建", "350000", "福建"), ("江西", "360000", "江西"),
-    ("山东", "370000", "山東"), ("河南", "410000", "河南"), ("湖北", "420000", "湖北"),
-    ("湖南", "430000", "湖南"), ("广东", "440000", "広東"), ("广西", "450000", "広西"),
-    ("海南", "460000", "海南"), ("重庆", "500000", "重慶"), ("四川", "510000", "四川"),
-    ("贵州", "520000", "貴州"), ("云南", "530000", "雲南"), ("西藏", "540000", "チベット"),
-    ("陕西", "610000", "陝西"), ("甘肃", "620000", "甘粛"), ("青海", "630000", "青海"),
-    ("宁夏", "640000", "寧夏"), ("新疆", "650000", "新疆"),
+    ("全国", "000000", "全国", "China (National)"),
+    ("北京", "110000", "北京", "Beijing"), ("天津", "120000", "天津", "Tianjin"),
+    ("河北", "130000", "河北", "Hebei"), ("山西", "140000", "山西", "Shanxi"),
+    ("内蒙古", "150000", "内モンゴル", "Inner Mongolia"),
+    ("辽宁", "210000", "遼寧", "Liaoning"), ("吉林", "220000", "吉林", "Jilin"),
+    ("黑龙江", "230000", "黒龍江", "Heilongjiang"),
+    ("上海", "310000", "上海", "Shanghai"), ("江苏", "320000", "江蘇", "Jiangsu"),
+    ("浙江", "330000", "浙江", "Zhejiang"), ("安徽", "340000", "安徽", "Anhui"),
+    ("福建", "350000", "福建", "Fujian"), ("江西", "360000", "江西", "Jiangxi"),
+    ("山东", "370000", "山東", "Shandong"), ("河南", "410000", "河南", "Henan"),
+    ("湖北", "420000", "湖北", "Hubei"), ("湖南", "430000", "湖南", "Hunan"),
+    ("广东", "440000", "広東", "Guangdong"), ("广西", "450000", "広西", "Guangxi"),
+    ("海南", "460000", "海南", "Hainan"), ("重庆", "500000", "重慶", "Chongqing"),
+    ("四川", "510000", "四川", "Sichuan"), ("贵州", "520000", "貴州", "Guizhou"),
+    ("云南", "530000", "雲南", "Yunnan"), ("西藏", "540000", "チベット", "Tibet"),
+    ("陕西", "610000", "陝西", "Shaanxi"), ("甘肃", "620000", "甘粛", "Gansu"),
+    ("青海", "630000", "青海", "Qinghai"), ("宁夏", "640000", "寧夏", "Ningxia"),
+    ("新疆", "650000", "新疆", "Xinjiang"),
 ]
 NAME2CODE = {r[0]: r[1] for r in REGIONS}
+CODE2ZH = {r[1]: r[0] for r in REGIONS}
 CODE2JA = {r[1]: r[2] for r in REGIONS}
+CODE2EN = {r[1]: r[3] for r in REGIONS}
 ORDER = [r[1] for r in REGIONS]
+
+
+def reg_label(code: str) -> str:
+    """地域名を 中文/日本語/English の3行で返す。"""
+    return f"{CODE2ZH.get(code, code)}\n{CODE2JA.get(code, '')}\n{CODE2EN.get(code, '')}"
+
+
+# 系列名(指標名) の対訳: 中文 -> (日本語, English)
+SERIES_I18N = {
+    "地区生产总值": ("域内総生産(GRP)", "Gross Regional Product"),
+    "人均地区生产总值(元)": ("一人当たりGRP(元)", "Per-capita GRP (yuan)"),
+    "第一产业": ("第一次産業", "Primary industry"),
+    "第二产业": ("第二次産業", "Secondary industry"),
+    "第三产业": ("第三次産業", "Tertiary industry"),
+    "农林牧渔业": ("農林牧漁業", "Agri./Forestry/Husbandry/Fishery"),
+    "工业": ("工業", "Industry"),
+    "建筑业": ("建設業", "Construction"),
+    "批发和零售业": ("卸売・小売業", "Wholesale & Retail"),
+    "交通运输仓储和邮政业": ("運輸・倉庫・郵政業", "Transport/Storage/Post"),
+    "住宿和餐饮业": ("宿泊・飲食業", "Hotels & Catering"),
+    "金融业": ("金融業", "Finance"),
+    "房地产业": ("不動産業", "Real Estate"),
+    "其他": ("その他", "Others"),
+    "社会消费品零售总额": ("社会消費財小売総額", "Total Retail Sales of Consumer Goods"),
+    "货物进出口": ("貨物輸出入", "Goods Imports & Exports"),
+    "货物出口": ("貨物輸出", "Goods Exports"),
+    "货物进口": ("貨物輸入", "Goods Imports"),
+    "房地产开发完成投资": ("不動産開発完成投資", "Real Estate Development Investment"),
+    "商品房销售面积": ("商品住宅販売面積", "Floor Space of Buildings Sold"),
+    "商品房销售额": ("商品住宅販売額", "Sales of Buildings (value)"),
+    "全社会固定资产投资(亿元)": ("全社会固定資産投資(億元)", "Total Fixed Asset Investment (100M yuan)"),
+    "全社会FAI 比上年增长(%)": ("全社会FAI 前年比(%)", "Total FAI YoY (%)"),
+    "房地产开发投资(亿元)": ("不動産開発投資(億元)", "Real Estate Dev. Investment (100M yuan)"),
+    "房地产开发投资 比上年增长(%)": ("不動産開発投資 前年比(%)", "RE Dev. Investment YoY (%)"),
+    "全部投资(亿元)": ("全体投資(億元)", "Total Investment (100M yuan)"),
+    "第一产业(亿元)": ("第一次産業(億元)", "Primary industry (100M yuan)"),
+    "第二产业(亿元)": ("第二次産業(億元)", "Secondary industry (100M yuan)"),
+    "第三产业(亿元)": ("第三次産業(億元)", "Tertiary industry (100M yuan)"),
+}
+
+
+def ser_label(zh: str) -> str:
+    """系列名を 中文/日本語/English の3行で返す（未登録は中文のみ）。"""
+    ja, en = SERIES_I18N.get(zh, ("", ""))
+    parts = [zh]
+    if ja:
+        parts.append(ja)
+    if en:
+        parts.append(en)
+    return "\n".join(parts)
 
 
 def norm_region(s) -> str | None:
@@ -492,7 +551,7 @@ def _write_timeseries(ws, title, sub) -> None:
     ws.cell(3, 1, "年 / Year").font = HDR_FONT
     ws.cell(3, 1).fill = HDR_FILL
     for j, s in enumerate(series):
-        cell = ws.cell(3, 2 + j, s)
+        cell = ws.cell(3, 2 + j, ser_label(s))
         cell.font = HDR_FONT
         cell.fill = HDR_FILL
         cell.alignment = CENTER
@@ -507,9 +566,10 @@ def _write_timeseries(ws, title, sub) -> None:
                 cell.number_format = '0.0"%"' if "增长" in s or "%" in s else "#,##0.0"
         r += 1
     ws.freeze_panes = "B4"
+    ws.row_dimensions[3].height = 66
     ws.column_dimensions["A"].width = 8
     for j in range(len(series)):
-        ws.column_dimensions[get_column_letter(2 + j)].width = 20
+        ws.column_dimensions[get_column_letter(2 + j)].width = 24
 
 
 def _write_goods(ws, title, sub) -> None:
@@ -592,13 +652,13 @@ def _write_theme(ws, title, sub) -> None:
 
     # ヘッダ: 地区 | (系列×年 の 値) ... | (YoY×年) ...
     row = 3
-    ws.cell(row, 1, "地区/地域").font = HDR_FONT
-    ws.cell(row, 1).fill = HDR_FILL
+    hc = ws.cell(row, 1, "地区\n地域\nRegion")
+    hc.font = HDR_FONT; hc.fill = HDR_FILL; hc.alignment = CENTER
     col = 2
     colmap = {}
     for s in series_list:
         for y in years:
-            cell = ws.cell(row, col, f"{s}\n{y} 値")
+            cell = ws.cell(row, col, f"{ser_label(s)}\n{y} 値")
             cell.font = HDR_FONT; cell.fill = HDR_FILL; cell.alignment = CENTER
             colmap[("val", s, y)] = col
             col += 1
@@ -606,18 +666,19 @@ def _write_theme(ws, title, sub) -> None:
         for s in series_list:
             for y in years:
                 if sub[(sub.series == s) & (sub.year == y)]["yoy"].notna().any():
-                    cell = ws.cell(row, col, f"{s}\n{y} 前年比%")
+                    cell = ws.cell(row, col, f"{ser_label(s)}\n{y} 前年比%")
                     cell.font = HDR_FONT; cell.fill = HDR_FILL; cell.alignment = CENTER
                     colmap[("yoy", s, y)] = col
                     col += 1
 
-    # 地区は年鑑順
+    # 地区は年鑑順（中文/日本語/English を1セルに3行）
     present = set(sub["region_code"])
     r = row + 1
     for code in ORDER:
         if code not in present:
             continue
-        ws.cell(r, 1, f"{CODE2JA.get(code, code)}")
+        rc = ws.cell(r, 1, reg_label(code))
+        rc.alignment = Alignment(vertical="center", wrap_text=True)
         for (kind, s, y), c in colmap.items():
             rows = sub[(sub.region_code == code) & (sub.series == s) & (sub.year == y)]
             if rows.empty:
@@ -629,9 +690,10 @@ def _write_theme(ws, title, sub) -> None:
         r += 1
 
     ws.freeze_panes = "B4"
-    ws.column_dimensions["A"].width = 12
+    ws.row_dimensions[row].height = 66   # 3言語＋年でヘッダを高く
+    ws.column_dimensions["A"].width = 16
     for c in range(2, col):
-        ws.column_dimensions[get_column_letter(c)].width = 14
+        ws.column_dimensions[get_column_letter(c)].width = 16
 
 
 if __name__ == "__main__":
