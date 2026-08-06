@@ -106,6 +106,32 @@ def cmd_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_build_dg(args: argparse.Namespace) -> int:
+    """新版DG APIから月次データを取得してExcel生成/更新（VPN不要）。"""
+    from .dg_client import DGClient
+    from .dg_fetch import fetch_all as dg_fetch_all
+
+    dg_config = _load_yaml(CONFIG_DIR / "indicators_dg.yaml")
+    regions = _load_yaml(CONFIG_DIR / "regions.yaml")
+    client = DGClient(sleep=dg_config.get("settings", {}).get("sleep", 0.2))
+
+    records = dg_fetch_all(client, dg_config, regions)
+    if not records:
+        logger.error("DGからレコードを取得できませんでした。")
+        return 2
+    df = records_to_frame(records)
+    # excel_writer 用に indicators に frequency キーを補完
+    for i in dg_config.get("indicators", []):
+        i.setdefault("frequency", i.get("freq"))
+    _finalize(df, dg_config, regions, dg_config.get("settings", {}),
+              resolved_codes=[{"indicator": i["key"], "db": "dg",
+                               "role": i["freq"], "code": i["report_id"],
+                               "matched": i["target"]}
+                              for i in dg_config.get("indicators", [])
+                              if i.get("enabled") is not False])
+    return 0
+
+
 def cmd_discover(args: argparse.Namespace) -> int:
     from .nbs_client import NBSClient
     from .resolver import Resolver
@@ -200,6 +226,9 @@ def main(argv: list[str] | None = None) -> int:
 
     pm = sub.add_parser("demo", help="合成データでExcel生成（オフライン検証）")
     pm.set_defaults(func=cmd_demo)
+
+    pg = sub.add_parser("build-dg", help="新版DG APIから月次取得してExcel生成（VPN不要）")
+    pg.set_defaults(func=cmd_build_dg)
 
     args = p.parse_args(argv)
     return args.func(args)
