@@ -249,9 +249,15 @@ def _chunks_by_year(periods: list[str]) -> list[list[str]]:
 
 def run(monthly_from: str = "201501", only_recent: int | None = None,
         sleep: float = 0.0, timeout: float = 15.0, workers: int = 8,
-        retries: int = 2) -> pd.DataFrame:
+        retries: int = 2, only_reports: str | None = None) -> pd.DataFrame:
     client = DGClient(sleep=sleep, timeout=timeout)
     reports = list_monthly_reports(client)
+    if only_reports:
+        # 名前 or report_id の部分一致でレポートを絞り込む（カンマ区切り）。
+        needles = [s.strip() for s in only_reports.split(",") if s.strip()]
+        reports = [r for r in reports
+                   if any(n in r["name"] or n == r["report_id"] for n in needles)]
+        logger.info("レポート絞り込み: %s -> %d 件", needles, len(reports))
     logger.info("月度レポート数: %d", len(reports))
 
     end = _now_ym()

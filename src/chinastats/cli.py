@@ -142,6 +142,7 @@ def cmd_build_dg_all(args: argparse.Namespace) -> int:
         workers=args.workers,
         timeout=args.timeout,
         retries=args.retries,
+        only_reports=(args.only or None),
     )
     if df is None or df.empty:
         logger.error("DG(all) 取得0件")
@@ -321,6 +322,8 @@ def main(argv: list[str] | None = None) -> int:
                      help="1リクエストのタイムアウト秒（既定15）")
     pga.add_argument("--retries", type=int, default=int(os.environ.get("RETRIES") or "2"),
                      help="リクエスト失敗時のリトライ回数（既定2）")
+    pga.add_argument("--only", default=(os.environ.get("ONLY") or ""),
+                     help="レポート名/IDの部分一致で取得対象を限定（カンマ区切り）")
     pga.set_defaults(func=cmd_build_dg_all)
 
     args = p.parse_args(argv)

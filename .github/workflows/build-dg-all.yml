@@ -25,6 +25,10 @@ on:
         description: "リクエスト失敗時のリトライ回数（空で2）"
         required: false
         default: ""
+      only:
+        description: "レポート名/IDの部分一致で対象限定（カンマ区切り、空で全件）"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -51,6 +55,7 @@ jobs:
           WORKERS: ${{ github.event.inputs.workers }}
           TIMEOUT: ${{ github.event.inputs.timeout }}
           RETRIES: ${{ github.event.inputs.retries }}
+          ONLY: ${{ github.event.inputs.only }}
         run: |
           # 定期実行(scheduleでinputs空)は直近4か月だけ取得＝改定検出しつつ高速。
           # 手動で since を指定した場合は全期間バックフィル（recentは付けない）。
@@ -61,6 +66,7 @@ jobs:
           if [ -n "${WORKERS}" ]; then ARGS="$ARGS --workers ${WORKERS}"; fi
           if [ -n "${TIMEOUT}" ]; then ARGS="$ARGS --timeout ${TIMEOUT}"; fi
           if [ -n "${RETRIES}" ]; then ARGS="$ARGS --retries ${RETRIES}"; fi
+          if [ -n "${ONLY}" ]; then ARGS="$ARGS --only ${ONLY}"; fi
           python -m chinastats.cli build-dg-all $ARGS
       - uses: actions/upload-artifact@v4
         if: always()
