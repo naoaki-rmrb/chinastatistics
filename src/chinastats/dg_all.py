@@ -138,34 +138,33 @@ def to_processed(df_raw: pd.DataFrame) -> pd.DataFrame:
     out = level.merge(yoy, on=key, how="outer")
 
     # computed_yoy / mom（同一 report×indicator×region 内で期間比較）
+    # ※ pandas 3.x では groupby.apply が group 列を落とすため、
+    #   shift / self-merge によるベクトル演算で列を保持したまま計算する。
+    import numpy as np
+
     out["year"] = out["period"].str[:4].astype(int)
     out["mon"] = out["period"].str[5:7].astype(int)
-    out = out.sort_values(["report_id", "indicator", "region_code", "year", "mon"])
-    g = out.groupby(["report_id", "indicator", "region_code"], group_keys=False)
+    gcols = ["report_id", "indicator", "region_code"]
+    out = out.sort_values(gcols + ["year", "mon"]).reset_index(drop=True)
 
-    def _derive(sub: pd.DataFrame) -> pd.DataFrame:
-        sub = sub.copy()
-        lut = {(r.year, r.mon): r.level for r in sub.itertuples(index=False)}
-        cy, mo = [], []
-        prev = {}
-        for r in sub.itertuples(index=False):
-            py = lut.get((r.year - 1, r.mon))
-            cy.append((r.level / py - 1) * 100 if pd.notna(r.level) and py not in (None, 0)
-                      and pd.notna(py) else None)
-            pm = prev.get("v")
-            mo.append((r.level / pm - 1) * 100 if pd.notna(r.level) and pm not in (None, 0)
-                      and pm is not None and pd.notna(pm) else None)
-            prev["v"] = r.level
-        sub["computed_yoy"] = cy
-        sub["mom"] = mo
-        return sub
+    # 対前月比: グループ内の直前行（＝直前期）と比較
+    prev_level = out.groupby(gcols, sort=False)["level"].shift(1)
+    out["mom"] = (out["level"] / prev_level - 1) * 100
 
-    out = g.apply(_derive)
-    out["yoy_gap"] = out.apply(
-        lambda r: (r["computed_yoy"] - r["official_yoy"])
-        if pd.notna(r.get("computed_yoy")) and pd.notna(r.get("official_yoy")) else None,
-        axis=1)
-    return out.drop(columns=["year", "mon"]).reset_index(drop=True)
+    # 対前年比(計算値): 同一グループ・同月・前年の level と比較
+    ly = out[gcols + ["year", "mon", "level"]].copy()
+    ly["year"] = ly["year"] + 1
+    ly = ly.rename(columns={"level": "level_ly"})
+    ly = ly.drop_duplicates(subset=gcols + ["year", "mon"], keep="first")
+    out = out.merge(ly, on=gcols + ["year", "mon"], how="left")
+    out["computed_yoy"] = (out["level"] / out["level_ly"] - 1) * 100
+
+    # 0除算・欠損は NaN に
+    out[["mom", "computed_yoy"]] = out[["mom", "computed_yoy"]].replace(
+        [np.inf, -np.inf], np.nan)
+
+    out["yoy_gap"] = out["computed_yoy"] - out["official_yoy"]
+    return out.drop(columns=["year", "mon", "level_ly"]).reset_index(drop=True)
 
 
 def load_master() -> pd.DataFrame:
