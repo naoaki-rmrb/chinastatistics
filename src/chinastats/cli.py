@@ -167,13 +167,16 @@ def dg_all_excel(df) -> None:
     used = set()
     for report, sub in df.groupby("report"):
         # 主要指標 = i_name と一致し内訳(kj1)が無い指標。無ければ最頻indicator
-        head = sub[(sub["indicator"] == sub["i_name"])]
-        if "kj1" in sub.columns:
-            head = head[sub["kj1"].isna() | (sub["kj1"] == "")]
+        head = sub
+        if "i_name" in sub.columns:
+            head = head[head["indicator"] == head["i_name"]]
+        if "kj1" in head.columns:
+            head = head[head["kj1"].isna() | (head["kj1"] == "")]
         if head.empty:
             head = sub
         ind = head["indicator"].value_counts().index[0]
-        s = sub[sub["indicator"] == ind]
+        # 内訳行がセルを上書きしないよう、見出し行(head)に限定して集計
+        s = head[head["indicator"] == ind]
         name = str(report)[:28]
         base = name
         k = 1

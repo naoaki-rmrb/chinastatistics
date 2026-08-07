@@ -129,22 +129,28 @@ def to_processed(df_raw: pd.DataFrame) -> pd.DataFrame:
     df["v"] = pd.to_numeric(df["v"], errors="coerce")
     df["is_yoy"] = df["dp"].isin(DP_YOY)
     df["is_level"] = df["dp"].isin(DP_LEVEL) & (df["unit"] != "%")
+    # 内訳(kj1)・指標正式名(i_name)は欠損があり得るので埋めてキーに含める。
+    # ※ kj1 をキーに含めないと、同一 indicator の国別・品目別など内訳系列が
+    #   1本に潰れて値が混ざる（agg(first)）。必ず区別する。
+    df["kj1"] = df["kj1"].fillna("")
+    df["i_name"] = df["i_name"].fillna(df["indicator"])
 
-    key = ["report", "report_id", "indicator", "region_code", "region_name", "period"]
+    key = ["report", "report_id", "indicator", "i_name", "kj1",
+           "region_code", "region_name", "period"]
     level = (df[df["is_level"]].groupby(key, as_index=False)
              .agg(level=("v", "first"), unit=("unit", "first")))
     yoy = (df[df["is_yoy"]].groupby(key, as_index=False)
            .agg(official_yoy=("v", "first")))
     out = level.merge(yoy, on=key, how="outer")
 
-    # computed_yoy / mom（同一 report×indicator×region 内で期間比較）
+    # computed_yoy / mom（同一 report×indicator×内訳×region 内で期間比較）
     # ※ pandas 3.x では groupby.apply が group 列を落とすため、
     #   shift / self-merge によるベクトル演算で列を保持したまま計算する。
     import numpy as np
 
     out["year"] = out["period"].str[:4].astype(int)
     out["mon"] = out["period"].str[5:7].astype(int)
-    gcols = ["report_id", "indicator", "region_code"]
+    gcols = ["report_id", "indicator", "i_name", "kj1", "region_code"]
     out = out.sort_values(gcols + ["year", "mon"]).reset_index(drop=True)
 
     # 対前月比: グループ内の直前行（＝直前期）と比較
