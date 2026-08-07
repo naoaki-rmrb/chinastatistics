@@ -1,4 +1,4 @@
-"""新版NBS API 探索v5: getHtmlContent の完全ダンプ(期間リスト構造) + GDP DT検証。"""
+"""探索v6: 期間(DT)コード形式の特定。時間一覧APIとgetHtmlContentのdt受理を検証。"""
 
 import json
 import requests
@@ -11,43 +11,54 @@ H = {
     "Client": "pc",
     "Referer": "https://data.stats.gov.cn/dg/website/page.html",
 }
+# _id (tree node id) 群
+NIDS = {
+    "月次_工业增加值增速": "731705122d3a42e295988f7d95a595eb",
+    "月次_retail": "8baef5916d504305a5da8f916094de25",
+    "季度_地区生产总值": "b2682f292e594cac82700fe84bb5ce0c",
+    "年度_社会消费品零售总额": "cf9538a8530d4b7bb1f1c459bcde8624",
+}
+GDP_RID = "b4241c76593e4f01b2364c01d698f9c6"
 
 
-def get(path, **params):
-    return requests.get(BASE + path, params=params, headers=H, timeout=30)
+def g(path, **p):
+    return requests.get(BASE + path, params=p, headers=H, timeout=30)
 
 
 def main():
-    # getHtmlContent フルダンプ: 月次(retail) と 四半期(GDP)
-    targets = {
-        "retail_月次_nid": "8baef5916d504305a5da8f916094de25",
-        "GDP_季度_nid": "b2682f292e594cac82700fe84bb5ce0c",
-    }
-    for name, nid in targets.items():
-        r = get("getHtmlContent", id=nid)
-        print(f"\n===== getHtmlContent {name}={nid} -> {r.status_code} =====")
-        try:
-            j = r.json()
-            print(json.dumps(j, ensure_ascii=False)[:5000])
-        except Exception as e:  # noqa: BLE001
-            print("nonjson", e, r.text[:200])
+    # 1) 時間一覧API候補
+    for label, nid in NIDS.items():
+        for path in ("getHtmlContentTime", "getReportDt", "getDtById", "queryDt"):
+            for key in ("id", "reportId"):
+                r = g(path, **{key: nid})
+                body = r.text.strip()
+                if r.status_code == 200 and body[:1] in "{[":
+                    print(f"\n[TIME OK] {label} {path}?{key} -> 200")
+                    print(body[:1200])
 
-    # GDP: dt="2024" 等の年ベースを検証
-    GDP = "b4241c76593e4f01b2364c01d698f9c6"
-    for dt in ("2024", "2023", "2024LB", "2024A", "2025"):
-        r = get("queryMacroReportDataById", REPORTID=GDP, DA="000000000000", DT=dt)
+    # 2) getHtmlContent の dt 受理テスト（GDP: 年/四半期の候補）
+    gdp_nid = NIDS["季度_地区生产总值"]
+    print("\n== getHtmlContent(GDP) dt候補 ==")
+    for dt in ("", "2024", "2024LB", "2024A", "2024B", "2024C", "2024D",
+               "202412", "2024JD", "20244", "2024ND", "2024Y", "2024LJ"):
+        r = g("getHtmlContent", id=gdp_nid, dt=dt)
         try:
-            j = r.json()
+            j = r.json(); d = j.get("data") or {}
+            print(f"  dt={dt!r} -> {r.status_code} dt_meta={d.get('dt')} "
+                  f"has_html={bool(d.get('html_content'))} msg={j.get('message')}")
         except Exception:
-            print(f"GDP DT={dt} nonjson"); continue
-        rows = j.get("data") if isinstance(j.get("data"), list) else None
-        if rows:
-            das = sorted({str(x.get("DA_NAME")) for x in rows})
-            print(f"GDP DT={dt} -> OK rows={len(rows)} #DA={len(das)} "
-                  f"DA(sample)={das[:6]} sampleV={rows[0].get('V')} "
-                  f"DP={sorted({x.get('DP_NAME') for x in rows})}")
-        else:
-            print(f"GDP DT={dt} -> rows=0 msg={j.get('message')}")
+            print(f"  dt={dt!r} -> {r.status_code} nonjson")
+
+    # 3) queryMacroReportDataById(GDP) 追加候補
+    print("\n== queryMacroReportDataById(GDP) dt候補 ==")
+    for dt in ("2024C", "2024D", "20244JD", "202404JD", "2024ND", "2024LJ",
+               "2024LB4", "2024B4", "2024年", "2024LN"):
+        r = g("queryMacroReportDataById", REPORTID=GDP_RID, DA="000000000000", DT=dt)
+        try:
+            j = r.json(); rows = j.get("data") if isinstance(j.get("data"), list) else None
+            print(f"  dt={dt!r} -> rows={len(rows) if rows else 0} msg={j.get('message')}")
+        except Exception:
+            print(f"  dt={dt!r} -> nonjson")
 
 
 if __name__ == "__main__":
