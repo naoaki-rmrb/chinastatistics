@@ -1,0 +1,63 @@
+name: 月度全レポート更新 (DG API all-reports)
+
+on:
+  schedule:
+    - cron: "0 2 20 * *"      # 毎月20日 02:00 UTC（build-dg の後）
+  workflow_dispatch:
+    inputs:
+      since:
+        description: "バックフィル開始 YYYYMM（空なら既定/インクリメンタル）"
+        required: false
+        default: ""
+      recent:
+        description: "直近Nか月のみ（インクリメンタル）。空/0で設定に従う"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: china-stats-dg-all
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: データ取得（月度全レポート・新版DG API）
+        env:
+          PYTHONPATH: src
+          SINCE: ${{ github.event.inputs.since }}
+          RECENT: ${{ github.event.inputs.recent }}
+        run: |
+          ARGS=""
+          if [ -n "${SINCE}" ]; then ARGS="$ARGS --since ${SINCE}"; fi
+          if [ -n "${RECENT}" ]; then ARGS="$ARGS --recent ${RECENT}"; fi
+          python -m chinastats.cli build-dg-all $ARGS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dg_all
+          path: |
+            output/dg_master.csv.gz
+            output/dg_index.csv
+            output/china_dg_all.xlsx
+          if-no-files-found: warn
+      - name: コミット
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add output/dg_master.csv.gz output/dg_index.csv output/china_dg_all.xlsx
+          if git diff --cached --quiet; then
+            echo "変更なし"
+          else
+            git commit -m "chore: 月度全レポート更新 $(date -u +%Y-%m-%d)"
+            git push
+          fi

@@ -132,6 +132,77 @@ def cmd_build_dg(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_build_dg_all(args: argparse.Namespace) -> int:
+    """月度カタログの全レポート×全指標×全地区を取得（VPN不要）。"""
+    from . import dg_all
+    df = dg_all.run(
+        monthly_from=args.since,
+        only_recent=(args.recent or None),
+        sleep=args.sleep,
+    )
+    if df is None or df.empty:
+        logger.error("DG(all) 取得0件")
+        return 2
+    # 読みやすい要約Excel（各レポートの主要指標＝内訳なし行）を生成
+    try:
+        dg_all_excel(df)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("要約Excel生成に失敗（masterは保存済み）: %s", exc)
+    return 0
+
+
+def dg_all_excel(df) -> None:
+    """master から各レポートの主要指標(内訳kj1が空)を地区×期間で1シートずつ出力。"""
+    from openpyxl import Workbook
+    from openpyxl.utils import get_column_letter
+    out = OUTPUT_DIR / "china_dg_all.xlsx"
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    wb = Workbook()
+    ws0 = wb.active
+    ws0.title = "説明"
+    ws0["A1"] = "中国 月度データ（新版DG API・全レポート）"
+    ws0["A2"] = "各シート＝1レポート。主要指標を 地区(行)×期間(列) の値で表示。"
+    ws0["A3"] = "全データ(全指標・公式/計算前年比・乖離)は output/dg_master.csv.gz を参照。"
+    used = set()
+    for report, sub in df.groupby("report"):
+        # 主要指標 = i_name と一致し内訳(kj1)が無い指標。無ければ最頻indicator
+        head = sub[(sub["indicator"] == sub["i_name"])]
+        if "kj1" in sub.columns:
+            head = head[sub["kj1"].isna() | (sub["kj1"] == "")]
+        if head.empty:
+            head = sub
+        ind = head["indicator"].value_counts().index[0]
+        s = sub[sub["indicator"] == ind]
+        name = str(report)[:28]
+        base = name
+        k = 1
+        while name in used:
+            name = f"{base[:26]}_{k}"
+            k += 1
+        used.add(name)
+        ws = wb.create_sheet(name)
+        ws.cell(1, 1, f"{report} / {ind}")
+        periods = sorted(s["period"].unique())
+        regions = list(dict.fromkeys(s.sort_values("region_code")["region_name"]))
+        ws.cell(3, 1, "地区\\期間")
+        pcol = {p: 2 + i for i, p in enumerate(periods)}
+        for p, c in pcol.items():
+            ws.cell(3, c, p)
+        rmap = {}
+        for i, rn in enumerate(regions):
+            ws.cell(4 + i, 1, rn)
+            rmap[rn] = 4 + i
+        for r in s.itertuples(index=False):
+            rr = rmap.get(r.region_name)
+            cc = pcol.get(r.period)
+            if rr and cc and pd.notna(getattr(r, "level", None)):
+                ws.cell(rr, cc, float(r.level)).number_format = "#,##0.0"
+        ws.freeze_panes = "B4"
+        ws.column_dimensions["A"].width = 16
+    wb.save(out)
+    logger.info("要約Excel: %s（%dシート）", out, len(used))
+
+
 def cmd_discover(args: argparse.Namespace) -> int:
     from .nbs_client import NBSClient
     from .resolver import Resolver
@@ -229,6 +300,14 @@ def main(argv: list[str] | None = None) -> int:
 
     pg = sub.add_parser("build-dg", help="新版DG APIから月次取得してExcel生成（VPN不要）")
     pg.set_defaults(func=cmd_build_dg)
+
+    pga = sub.add_parser("build-dg-all", help="月度カタログ全レポートを取得（VPN不要）")
+    pga.add_argument("--since", default=os.environ.get("SINCE", "201501"),
+                     help="月次バックフィル開始 YYYYMM（既定201501）")
+    pga.add_argument("--recent", type=int, default=int(os.environ.get("RECENT", "0")),
+                     help="直近Nか月のみ取得（インクリメンタル用、0で全期間）")
+    pga.add_argument("--sleep", type=float, default=float(os.environ.get("SLEEP", "0.15")))
+    pga.set_defaults(func=cmd_build_dg_all)
 
     args = p.parse_args(argv)
     return args.func(args)
