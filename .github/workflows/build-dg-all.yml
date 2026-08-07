@@ -72,10 +72,11 @@ jobs:
             output/china_dg_all.xlsx
           if-no-files-found: warn
       - name: コミット
+        if: always()   # タイムアウトしてもチェックポイント済みの部分結果をコミット
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add output/dg_master.csv.gz output/dg_index.csv output/china_dg_all.xlsx
+          git add output/dg_master.csv.gz output/dg_index.csv output/china_dg_all.xlsx 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "変更なし"
           else

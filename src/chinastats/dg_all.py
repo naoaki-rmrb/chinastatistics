@@ -129,8 +129,8 @@ def _period(dt: str) -> str:
     return f"{dt[:4]}-{dt[4:6]}"
 
 
-def to_processed(df_raw: pd.DataFrame) -> pd.DataFrame:
-    """DPをピボットして level/official_yoy を作り、computed_yoy/mom を計算。"""
+def _pivot(df_raw: pd.DataFrame) -> pd.DataFrame:
+    """DP(本期/同比…)をピボットして level / official_yoy 列を作る（派生計算なし）。"""
     if df_raw.empty:
         return df_raw
     df = df_raw.copy()
@@ -149,13 +149,24 @@ def to_processed(df_raw: pd.DataFrame) -> pd.DataFrame:
              .agg(level=("v", "first"), unit=("unit", "first")))
     yoy = (df[df["is_yoy"]].groupby(key, as_index=False)
            .agg(official_yoy=("v", "first")))
-    out = level.merge(yoy, on=key, how="outer")
+    return level.merge(yoy, on=key, how="outer")
 
-    # computed_yoy / mom（同一 report×indicator×内訳×region 内で期間比較）
-    # ※ pandas 3.x では groupby.apply が group 列を落とすため、
-    #   shift / self-merge によるベクトル演算で列を保持したまま計算する。
+
+def _derive_yoy_mom(out: pd.DataFrame) -> pd.DataFrame:
+    """level/official_yoy を持つ表に computed_yoy / mom / yoy_gap を（再）計算。
+
+    ※ 同一 report×indicator×内訳×region の全期間が同じ表に揃っている前提。
+      チャンク取得ではチャンクごとではなく master 全体に対して呼ぶこと。
+    ※ pandas 3.x では groupby.apply が group 列を落とすため、
+      shift / self-merge のベクトル演算で列を保持したまま計算する。
+    """
+    if out.empty:
+        return out
     import numpy as np
 
+    out = out.drop(columns=[c for c in ("computed_yoy", "mom", "yoy_gap",
+                                        "year", "mon", "level_ly")
+                            if c in out.columns]).copy()
     out["year"] = out["period"].str[:4].astype(int)
     out["mon"] = out["period"].str[5:7].astype(int)
     gcols = ["report_id", "indicator", "i_name", "kj1", "region_code"]
@@ -181,6 +192,13 @@ def to_processed(df_raw: pd.DataFrame) -> pd.DataFrame:
     return out.drop(columns=["year", "mon", "level_ly"]).reset_index(drop=True)
 
 
+def to_processed(df_raw: pd.DataFrame) -> pd.DataFrame:
+    """DPをピボットして level/official_yoy を作り、computed_yoy/mom を計算。"""
+    if df_raw.empty:
+        return df_raw
+    return _derive_yoy_mom(_pivot(df_raw))
+
+
 def load_master() -> pd.DataFrame:
     if MASTER.exists():
         try:
@@ -195,6 +213,38 @@ def save_master(df: pd.DataFrame) -> None:
     OUTPUT.mkdir(parents=True, exist_ok=True)
     with gzip.open(MASTER, "wt", encoding="utf-8", newline="") as f:
         df.to_csv(f, index=False)
+
+
+def _merge_and_save(prev: pd.DataFrame, pivoted: pd.DataFrame) -> pd.DataFrame:
+    """新規ピボット行を既存 master にマージ→全体で派生列を再計算→保存。"""
+    key = ["report_id", "indicator", "i_name", "kj1", "region_code", "period"]
+    keep_cols = ["report", "report_id", "indicator", "i_name", "kj1",
+                 "region_code", "region_name", "period", "level", "unit",
+                 "official_yoy"]
+    frames = [f[[c for c in keep_cols if c in f.columns]]
+              for f in (prev, pivoted) if f is not None and not f.empty]
+    if not frames:
+        return prev if prev is not None else pd.DataFrame()
+    base = pd.concat(frames, ignore_index=True).drop_duplicates(
+        subset=key, keep="last")
+    # master 全体で computed_yoy / mom / yoy_gap を再計算（前年同月比のため）
+    merged = _derive_yoy_mom(base)
+    merged = merged.sort_values(["report", "indicator", "region_code", "period"])
+    save_master(merged)
+    idx = (merged.groupby(["report", "report_id"], as_index=False)
+           .agg(rows=("period", "size"),
+                indicators=("indicator", "nunique"),
+                regions=("region_code", "nunique"),
+                period_min=("period", "min"), period_max=("period", "max")))
+    idx.to_csv(INDEX, index=False)
+    return merged
+
+
+def _chunks_by_year(periods: list[str]) -> list[list[str]]:
+    out: dict[str, list[str]] = {}
+    for p in periods:
+        out.setdefault(p[:4], []).append(p)
+    return list(out.values())
 
 
 def run(monthly_from: str = "201501", only_recent: int | None = None,
@@ -218,32 +268,28 @@ def run(monthly_from: str = "201501", only_recent: int | None = None,
         periods = months(monthly_from, end)
     logger.info("取得期間: %s..%s (%d か月)", periods[0], periods[-1], len(periods))
 
-    raw = pd.DataFrame.from_records(
-        fetch_records(client, reports, periods, workers=workers,
-                      timeout=timeout, retries=retries))
-    if raw.empty:
+    # 年単位のチャンクで取得→処理→マージ→保存（チェックポイント）。
+    # 途中でタイムアウトしても、完了済みの年までは master に保存済みになる。
+    # ※ computed_yoy は同一 report×indicator×region の全期間で計算する必要が
+    #   あるため、各チャンク処理では「新規raw＋既存masterのlevel」を合わせて
+    #   to_processed し、前年同月比が途切れないようにする。
+    chunks = _chunks_by_year(periods)
+    merged = load_master()
+    for i, chunk in enumerate(chunks, 1):
+        logger.info("=== チャンク %d/%d: %s..%s ===", i, len(chunks),
+                    chunk[0], chunk[-1])
+        raw = pd.DataFrame.from_records(
+            fetch_records(client, reports, chunk, workers=workers,
+                          timeout=timeout, retries=retries))
+        if raw.empty:
+            logger.warning("チャンク %d はデータ0件、スキップ", i)
+            continue
+        pivoted = _pivot(raw)
+        merged = _merge_and_save(merged, pivoted)
+        logger.info("... master 保存: %d 行", 0 if merged is None else len(merged))
+
+    if merged is None or merged.empty:
         logger.error("データ取得0件")
-        return raw
-
-    proc = to_processed(raw)
-
-    # 既存とマージ（同一キーは新しい方で上書き）
-    prev = load_master()
-    if not prev.empty:
-        key = ["report_id", "indicator", "region_code", "period"]
-        merged = pd.concat([prev, proc], ignore_index=True)
-        merged = merged.drop_duplicates(subset=key, keep="last")
-    else:
-        merged = proc
-    merged = merged.sort_values(["report", "indicator", "region_code", "period"])
-    save_master(merged)
-
-    # レポート索引
-    idx = (merged.groupby(["report", "report_id"], as_index=False)
-           .agg(rows=("period", "size"),
-                indicators=("indicator", "nunique"),
-                regions=("region_code", "nunique"),
-                period_min=("period", "min"), period_max=("period", "max")))
-    idx.to_csv(INDEX, index=False)
-    logger.info("master 保存: %d 行 / レポート %d", len(merged), idx.shape[0])
+        return pd.DataFrame()
+    logger.info("完了: master %d 行", len(merged))
     return merged
