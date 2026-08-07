@@ -83,19 +83,27 @@ def _rows_to_records(rp: dict, dt: str, rows: list[dict]) -> list[dict]:
 
 
 def fetch_records(client: DGClient, reports: list[dict], periods: list[str],
-                  workers: int = 8, timeout: float = 30.0) -> list[dict]:
-    """(report×period) を並列取得。スレッドごとに専用 DGClient を使う。"""
+                  workers: int = 8, timeout: float = 15.0,
+                  retries: int = 2) -> list[dict]:
+    """(report×period) を並列取得。スレッドごとに専用 DGClient を使う。
+
+    NBS はGitHub Actionsの海外IPからだと1リクエスト数秒かかる上、時々失敗する。
+    ・retries を抑えめ(既定2)＋ timeout を短め(既定15s)にして、1件の遅延が
+      ワーカーを長時間占有しないようにする。
+    ・throughput は主に workers で稼ぐ（全期間バックフィルは workers を上げる）。
+    """
     import concurrent.futures as cf
     import threading
 
     tasks = [(rp, dt) for rp in reports for dt in periods]
-    logger.info("並列取得: タスク %d (workers=%d)", len(tasks), workers)
+    logger.info("並列取得: タスク %d (workers=%d, timeout=%ss, retries=%d)",
+                len(tasks), workers, timeout, retries)
     _tl = threading.local()
 
     def _client() -> DGClient:
         c = getattr(_tl, "c", None)
         if c is None:
-            c = DGClient(sleep=0.0, timeout=timeout)
+            c = DGClient(sleep=0.0, timeout=timeout, max_retries=retries)
             _tl.c = c
         return c
 
@@ -190,7 +198,8 @@ def save_master(df: pd.DataFrame) -> None:
 
 
 def run(monthly_from: str = "201501", only_recent: int | None = None,
-        sleep: float = 0.0, timeout: float = 30.0, workers: int = 8) -> pd.DataFrame:
+        sleep: float = 0.0, timeout: float = 15.0, workers: int = 8,
+        retries: int = 2) -> pd.DataFrame:
     client = DGClient(sleep=sleep, timeout=timeout)
     reports = list_monthly_reports(client)
     logger.info("月度レポート数: %d", len(reports))
@@ -210,7 +219,8 @@ def run(monthly_from: str = "201501", only_recent: int | None = None,
     logger.info("取得期間: %s..%s (%d か月)", periods[0], periods[-1], len(periods))
 
     raw = pd.DataFrame.from_records(
-        fetch_records(client, reports, periods, workers=workers, timeout=timeout))
+        fetch_records(client, reports, periods, workers=workers,
+                      timeout=timeout, retries=retries))
     if raw.empty:
         logger.error("データ取得0件")
         return raw

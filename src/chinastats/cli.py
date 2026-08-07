@@ -140,6 +140,8 @@ def cmd_build_dg_all(args: argparse.Namespace) -> int:
         only_recent=(args.recent or None),
         sleep=args.sleep,
         workers=args.workers,
+        timeout=args.timeout,
+        retries=args.retries,
     )
     if df is None or df.empty:
         logger.error("DG(all) 取得0件")
@@ -313,7 +315,12 @@ def main(argv: list[str] | None = None) -> int:
     pga.add_argument("--recent", type=int, default=int(os.environ.get("RECENT") or "0"),
                      help="直近Nか月のみ取得（インクリメンタル用、0で全期間）")
     pga.add_argument("--sleep", type=float, default=float(os.environ.get("SLEEP") or "0.0"))
-    pga.add_argument("--workers", type=int, default=int(os.environ.get("WORKERS") or "8"))
+    pga.add_argument("--workers", type=int, default=int(os.environ.get("WORKERS") or "8"),
+                     help="並列ワーカー数（全期間バックフィルは16〜24推奨）")
+    pga.add_argument("--timeout", type=float, default=float(os.environ.get("TIMEOUT") or "15"),
+                     help="1リクエストのタイムアウト秒（既定15）")
+    pga.add_argument("--retries", type=int, default=int(os.environ.get("RETRIES") or "2"),
+                     help="リクエスト失敗時のリトライ回数（既定2）")
     pga.set_defaults(func=cmd_build_dg_all)
 
     args = p.parse_args(argv)

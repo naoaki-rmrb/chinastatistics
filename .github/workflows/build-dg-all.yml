@@ -13,6 +13,14 @@ on:
         description: "直近Nか月のみ（インクリメンタル）。空/0で設定に従う"
         required: false
         default: ""
+      workers:
+        description: "並列ワーカー数（全期間バックフィルは16〜24推奨、空で8）"
+        required: false
+        default: ""
+      timeout:
+        description: "1リクエストのタイムアウト秒（空で15）"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -36,6 +44,8 @@ jobs:
           PYTHONPATH: src
           SINCE: ${{ github.event.inputs.since }}
           RECENT: ${{ github.event.inputs.recent }}
+          WORKERS: ${{ github.event.inputs.workers }}
+          TIMEOUT: ${{ github.event.inputs.timeout }}
         run: |
           # 定期実行(scheduleでinputs空)は直近4か月だけ取得＝改定検出しつつ高速。
           # 手動で since を指定した場合は全期間バックフィル（recentは付けない）。
@@ -43,6 +53,8 @@ jobs:
           ARGS=""
           if [ -n "${SINCE}" ]; then ARGS="$ARGS --since ${SINCE}"; fi
           if [ -n "${RECENT}" ]; then ARGS="$ARGS --recent ${RECENT}"; fi
+          if [ -n "${WORKERS}" ]; then ARGS="$ARGS --workers ${WORKERS}"; fi
+          if [ -n "${TIMEOUT}" ]; then ARGS="$ARGS --timeout ${TIMEOUT}"; fi
           python -m chinastats.cli build-dg-all $ARGS
       - uses: actions/upload-artifact@v4
         if: always()
