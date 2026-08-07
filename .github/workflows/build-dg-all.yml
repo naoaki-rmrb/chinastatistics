@@ -37,6 +37,9 @@ jobs:
           SINCE: ${{ github.event.inputs.since }}
           RECENT: ${{ github.event.inputs.recent }}
         run: |
+          # 定期実行(scheduleでinputs空)は直近4か月だけ取得＝改定検出しつつ高速。
+          # 手動で since を指定した場合は全期間バックフィル（recentは付けない）。
+          if [ -z "${SINCE}" ] && [ -z "${RECENT}" ]; then RECENT="4"; fi
           ARGS=""
           if [ -n "${SINCE}" ]; then ARGS="$ARGS --since ${SINCE}"; fi
           if [ -n "${RECENT}" ]; then ARGS="$ARGS --recent ${RECENT}"; fi

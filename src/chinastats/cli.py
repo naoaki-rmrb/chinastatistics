@@ -306,12 +306,14 @@ def main(argv: list[str] | None = None) -> int:
     pg.set_defaults(func=cmd_build_dg)
 
     pga = sub.add_parser("build-dg-all", help="月度カタログ全レポートを取得（VPN不要）")
-    pga.add_argument("--since", default=os.environ.get("SINCE", "201501"),
+    # ※ env が「設定済みだが空文字」のケース(GitHub Actions の空 input)でも
+    #   int("")/float("") で落ちないよう `or` で既定値にフォールバックする。
+    pga.add_argument("--since", default=(os.environ.get("SINCE") or "201501"),
                      help="月次バックフィル開始 YYYYMM（既定201501）")
-    pga.add_argument("--recent", type=int, default=int(os.environ.get("RECENT", "0")),
+    pga.add_argument("--recent", type=int, default=int(os.environ.get("RECENT") or "0"),
                      help="直近Nか月のみ取得（インクリメンタル用、0で全期間）")
-    pga.add_argument("--sleep", type=float, default=float(os.environ.get("SLEEP", "0.0")))
-    pga.add_argument("--workers", type=int, default=int(os.environ.get("WORKERS", "8")))
+    pga.add_argument("--sleep", type=float, default=float(os.environ.get("SLEEP") or "0.0"))
+    pga.add_argument("--workers", type=int, default=int(os.environ.get("WORKERS") or "8"))
     pga.set_defaults(func=cmd_build_dg_all)
 
     args = p.parse_args(argv)
