@@ -139,6 +139,7 @@ def cmd_build_dg_all(args: argparse.Namespace) -> int:
         monthly_from=args.since,
         only_recent=(args.recent or None),
         sleep=args.sleep,
+        workers=args.workers,
     )
     if df is None or df.empty:
         logger.error("DG(all) 取得0件")
@@ -306,7 +307,8 @@ def main(argv: list[str] | None = None) -> int:
                      help="月次バックフィル開始 YYYYMM（既定201501）")
     pga.add_argument("--recent", type=int, default=int(os.environ.get("RECENT", "0")),
                      help="直近Nか月のみ取得（インクリメンタル用、0で全期間）")
-    pga.add_argument("--sleep", type=float, default=float(os.environ.get("SLEEP", "0.15")))
+    pga.add_argument("--sleep", type=float, default=float(os.environ.get("SLEEP", "0.0")))
+    pga.add_argument("--workers", type=int, default=int(os.environ.get("WORKERS", "8")))
     pga.set_defaults(func=cmd_build_dg_all)
 
     args = p.parse_args(argv)

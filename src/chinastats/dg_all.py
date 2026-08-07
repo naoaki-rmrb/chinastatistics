@@ -62,36 +62,57 @@ def list_monthly_reports(client: DGClient) -> list[dict]:
     return leaves
 
 
+def _rows_to_records(rp: dict, dt: str, rows: list[dict]) -> list[dict]:
+    out = []
+    for r in rows:
+        dp = r.get("DP_NAME")
+        if dp not in KEEP_DP:
+            continue
+        v = r.get("V")
+        if v in (None, ""):
+            continue
+        out.append({
+            "report": rp["name"], "report_id": rp["report_id"],
+            "indicator": r.get("EK_NAME") or r.get("I_NAME"),
+            "i_name": r.get("I_NAME"), "kj1": r.get("KJ1_NAME"),
+            "region_code": r.get("DA"), "region_name": r.get("DA_NAME"),
+            "period": _period(dt), "dp": dp, "unit": r.get("DU_NAME"),
+            "v": v,
+        })
+    return out
+
+
 def fetch_records(client: DGClient, reports: list[dict], periods: list[str],
-                  sleep_log_every: int = 200) -> list[dict]:
+                  workers: int = 8, timeout: float = 30.0) -> list[dict]:
+    """(report×period) を並列取得。スレッドごとに専用 DGClient を使う。"""
+    import concurrent.futures as cf
+    import threading
+
+    tasks = [(rp, dt) for rp in reports for dt in periods]
+    logger.info("並列取得: タスク %d (workers=%d)", len(tasks), workers)
+    _tl = threading.local()
+
+    def _client() -> DGClient:
+        c = getattr(_tl, "c", None)
+        if c is None:
+            c = DGClient(sleep=0.0, timeout=timeout)
+            _tl.c = c
+        return c
+
+    def _do(task):
+        rp, dt = task
+        rows = _client().query_data(rp["report_id"], NAT, dt)
+        return _rows_to_records(rp, dt, rows)
+
     recs: list[dict] = []
-    n = 0
-    for rp in reports:
-        rid = rp["report_id"]
-        rname = rp["name"]
-        got = 0
-        for dt in periods:
-            rows = client.query_data(rid, NAT, dt)
-            n += 1
-            for r in rows:
-                dp = r.get("DP_NAME")
-                if dp not in KEEP_DP:
-                    continue
-                v = r.get("V")
-                if v in (None, ""):
-                    continue
-                recs.append({
-                    "report": rname, "report_id": rid,
-                    "indicator": r.get("EK_NAME") or r.get("I_NAME"),
-                    "i_name": r.get("I_NAME"), "kj1": r.get("KJ1_NAME"),
-                    "region_code": r.get("DA"), "region_name": r.get("DA_NAME"),
-                    "period": _period(dt), "dp": dp, "unit": r.get("DU_NAME"),
-                    "v": v,
-                })
-                got += 1
-            if n % sleep_log_every == 0:
-                logger.info("...%d calls, %d rows", n, len(recs))
-        logger.info("[%s] %d rows (report_id=%s)", rname, got, rid)
+    done = 0
+    with cf.ThreadPoolExecutor(max_workers=workers) as ex:
+        for part in ex.map(_do, tasks):
+            recs.extend(part)
+            done += 1
+            if done % 300 == 0:
+                logger.info("...%d/%d tasks, %d rows", done, len(tasks), len(recs))
+    logger.info("取得完了: %d タスク, %d 行", len(tasks), len(recs))
     return recs
 
 
@@ -164,7 +185,7 @@ def save_master(df: pd.DataFrame) -> None:
 
 
 def run(monthly_from: str = "201501", only_recent: int | None = None,
-        sleep: float = 0.15, timeout: float = 30.0) -> pd.DataFrame:
+        sleep: float = 0.0, timeout: float = 30.0, workers: int = 8) -> pd.DataFrame:
     client = DGClient(sleep=sleep, timeout=timeout)
     reports = list_monthly_reports(client)
     logger.info("月度レポート数: %d", len(reports))
@@ -184,7 +205,7 @@ def run(monthly_from: str = "201501", only_recent: int | None = None,
     logger.info("取得期間: %s..%s (%d か月)", periods[0], periods[-1], len(periods))
 
     raw = pd.DataFrame.from_records(
-        fetch_records(client, reports, periods))
+        fetch_records(client, reports, periods, workers=workers, timeout=timeout))
     if raw.empty:
         logger.error("データ取得0件")
         return raw
