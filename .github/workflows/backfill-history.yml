@@ -1,0 +1,77 @@
+name: 履歴バックフィル (Resume history backfill)
+
+# NBS が Actions の IP を持続スロットリングするため、1回では全期間を取り切れない。
+# レジューム方式（取得済みの月はスキップ）で数時間おきに走らせ、欠損を着実に埋める。
+# 履歴が埋まりきると各回は「取得0件・コミットなし」の軽い空振りになる。
+# 埋まり切ったらこのワークフローは無効化/削除してよい。
+
+on:
+  schedule:
+    - cron: "20 */6 * * *"     # 6時間おき
+  workflow_dispatch:
+    inputs:
+      since:
+        description: "遡り開始 YYYYMM（空で201001）"
+        required: false
+        default: ""
+      only:
+        description: "レポート限定（部分一致・カンマ区切り、空で全件）"
+        required: false
+        default: ""
+      workers:
+        description: "並列数（空で3）"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: china-stats-dg-all       # build-dg-all と直列化（同時実行を避ける）
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/china-economic-indicators-7exy6v
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: 欠損だけ取得（レジューム）
+        env:
+          PYTHONPATH: src
+          SINCE: ${{ github.event.inputs.since }}
+          ONLY: ${{ github.event.inputs.only }}
+          WORKERS: ${{ github.event.inputs.workers }}
+        run: |
+          SINCE_ARG="${SINCE:-201001}"
+          WK="${WORKERS:-3}"
+          ARGS="--since ${SINCE_ARG} --resume --workers ${WK} --timeout 12 --retries 2"
+          if [ -n "${ONLY}" ]; then ARGS="$ARGS --only ${ONLY}"; fi
+          python -m chinastats.cli build-dg-all $ARGS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dg_all
+          path: |
+            output/dg_master.csv.gz
+            output/dg_index.csv
+            output/china_dg_all.xlsx
+          if-no-files-found: warn
+      - name: コミット
+        if: always()   # タイムアウトしても取得済み分をコミット
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add output/dg_master.csv.gz output/dg_index.csv output/china_dg_all.xlsx 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "変更なし（欠損なし or 今回は取得0件）"
+          else
+            git commit -m "chore: 履歴バックフィル $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push origin HEAD:claude/china-economic-indicators-7exy6v
+          fi

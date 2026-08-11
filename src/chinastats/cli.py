@@ -143,6 +143,7 @@ def cmd_build_dg_all(args: argparse.Namespace) -> int:
         timeout=args.timeout,
         retries=args.retries,
         only_reports=(args.only or None),
+        resume=args.resume,
     )
     if df is None or df.empty:
         logger.error("DG(all) 取得0件")
@@ -324,6 +325,9 @@ def main(argv: list[str] | None = None) -> int:
                      help="リクエスト失敗時のリトライ回数（既定2）")
     pga.add_argument("--only", default=(os.environ.get("ONLY") or ""),
                      help="レポート名/IDの部分一致で取得対象を限定（カンマ区切り）")
+    pga.add_argument("--resume", action="store_true",
+                     default=(os.environ.get("RESUME", "").lower() in ("1", "true", "yes")),
+                     help="master に既にある月はスキップし、欠損だけ取得（レジューム）")
     pga.set_defaults(func=cmd_build_dg_all)
 
     args = p.parse_args(argv)

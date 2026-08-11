@@ -84,20 +84,25 @@ def _rows_to_records(rp: dict, dt: str, rows: list[dict]) -> list[dict]:
 
 def fetch_records(client: DGClient, reports: list[dict], periods: list[str],
                   workers: int = 8, timeout: float = 15.0,
-                  retries: int = 2) -> list[dict]:
+                  retries: int = 2, skip_keys: set | None = None) -> list[dict]:
     """(report×period) を並列取得。スレッドごとに専用 DGClient を使う。
 
     NBS はGitHub Actionsの海外IPからだと1リクエスト数秒かかる上、時々失敗する。
     ・retries を抑えめ(既定2)＋ timeout を短め(既定15s)にして、1件の遅延が
       ワーカーを長時間占有しないようにする。
     ・throughput は主に workers で稼ぐ（全期間バックフィルは workers を上げる）。
+    ・skip_keys に (report_id, "YYYY-MM") を渡すと取得済みの月をスキップ（レジューム）。
     """
     import concurrent.futures as cf
     import threading
 
-    tasks = [(rp, dt) for rp in reports for dt in periods]
-    logger.info("並列取得: タスク %d (workers=%d, timeout=%ss, retries=%d)",
-                len(tasks), workers, timeout, retries)
+    skip_keys = skip_keys or set()
+    tasks = [(rp, dt) for rp in reports for dt in periods
+             if (rp["report_id"], _period(dt)) not in skip_keys]
+    logger.info("並列取得: タスク %d (workers=%d, timeout=%ss, retries=%d, skip=%d)",
+                len(tasks), workers, timeout, retries, len(skip_keys))
+    if not tasks:
+        return []
     _tl = threading.local()
 
     def _client() -> DGClient:
@@ -249,7 +254,8 @@ def _chunks_by_year(periods: list[str]) -> list[list[str]]:
 
 def run(monthly_from: str = "201501", only_recent: int | None = None,
         sleep: float = 0.0, timeout: float = 15.0, workers: int = 8,
-        retries: int = 2, only_reports: str | None = None) -> pd.DataFrame:
+        retries: int = 2, only_reports: str | None = None,
+        resume: bool = False) -> pd.DataFrame:
     client = DGClient(sleep=sleep, timeout=timeout)
     reports = list_monthly_reports(client)
     if only_reports:
@@ -281,12 +287,17 @@ def run(monthly_from: str = "201501", only_recent: int | None = None,
     #   to_processed し、前年同月比が途切れないようにする。
     chunks = _chunks_by_year(periods)
     merged = load_master()
+    # レジューム: 既に master にある (report_id, period) はスキップし、欠損だけ取得。
+    skip_keys: set = set()
+    if resume and merged is not None and not merged.empty:
+        skip_keys = set(zip(merged["report_id"], merged["period"]))
+        logger.info("レジューム: 取得済み %d (report×period) をスキップ", len(skip_keys))
     for i, chunk in enumerate(chunks, 1):
         logger.info("=== チャンク %d/%d: %s..%s ===", i, len(chunks),
                     chunk[0], chunk[-1])
         raw = pd.DataFrame.from_records(
             fetch_records(client, reports, chunk, workers=workers,
-                          timeout=timeout, retries=retries))
+                          timeout=timeout, retries=retries, skip_keys=skip_keys))
         if raw.empty:
             logger.warning("チャンク %d はデータ0件、スキップ", i)
             continue
