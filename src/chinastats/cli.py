@@ -160,14 +160,16 @@ def dg_all_excel(df) -> None:
     """master から各レポートの主要指標(内訳kj1が空)を地区×期間で1シートずつ出力。"""
     from openpyxl import Workbook
     from openpyxl.utils import get_column_letter
+    from .labels import region_trilingual, report_trilingual
     out = OUTPUT_DIR / "china_dg_all.xlsx"
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     wb = Workbook()
     ws0 = wb.active
     ws0.title = "説明"
-    ws0["A1"] = "中国 月度データ（新版DG API・全レポート）"
+    ws0["A1"] = "中国 月度データ（新版DG API・全レポート） / China monthly data (all reports)"
     ws0["A2"] = "各シート＝1レポート。主要指標を 地区(行)×期間(列) の値で表示。"
     ws0["A3"] = "全データ(全指標・公式/計算前年比・乖離)は output/dg_master.csv.gz を参照。"
+    ws0["A4"] = "レポート名・地区名は 中文 / 日本語 / English で併記。"
     used = set()
     for report, sub in df.groupby("report"):
         # 主要指標 = i_name と一致し内訳(kj1)が無い指標。無ければ最頻indicator
@@ -189,16 +191,18 @@ def dg_all_excel(df) -> None:
             k += 1
         used.add(name)
         ws = wb.create_sheet(name)
-        ws.cell(1, 1, f"{report} / {ind}")
+        # タイトルは レポート名を 中文/日本語/English 併記（指標名は中文のまま付記）
+        ws.cell(1, 1, f"{report_trilingual(str(report))}  ［{ind}］")
         periods = sorted(s["period"].unique())
         regions = list(dict.fromkeys(s.sort_values("region_code")["region_name"]))
-        ws.cell(3, 1, "地区\\期間")
+        ws.cell(3, 1, "地区/地域/Region \\ 期間/Period")
         pcol = {p: 2 + i for i, p in enumerate(periods)}
         for p, c in pcol.items():
             ws.cell(3, c, p)
         rmap = {}
         for i, rn in enumerate(regions):
-            ws.cell(4 + i, 1, rn)
+            # 地区名も 中文/日本語/English 併記
+            ws.cell(4 + i, 1, region_trilingual(str(rn)))
             rmap[rn] = 4 + i
         for r in s.itertuples(index=False):
             rr = rmap.get(r.region_name)
@@ -206,7 +210,7 @@ def dg_all_excel(df) -> None:
             if rr and cc and pd.notna(getattr(r, "level", None)):
                 ws.cell(rr, cc, float(r.level)).number_format = "#,##0.0"
         ws.freeze_panes = "B4"
-        ws.column_dimensions["A"].width = 16
+        ws.column_dimensions["A"].width = 34
     wb.save(out)
     logger.info("要約Excel: %s（%dシート）", out, len(used))
 
