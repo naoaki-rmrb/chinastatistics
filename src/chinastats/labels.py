@@ -181,6 +181,31 @@ REPORT_LABELS: dict[str, tuple[str, str]] = {
 }
 
 
+def _compose(name: str) -> tuple[str, str]:
+    """合成語（"_"連結）を部品辞書で日本語・英語に自動合成。未登録部品は中文のまま残す。"""
+    from .token_labels import TOKEN_LABELS
+    parts = [p.strip() for p in str(name).split("_") if p.strip()]
+    ja_parts, en_parts = [], []
+    for p in parts:
+        pair = TOKEN_LABELS.get(p)
+        if pair:
+            ja_parts.append(pair[0]); en_parts.append(pair[1])
+        else:
+            ja_parts.append(p); en_parts.append(p)
+    return "／".join(ja_parts), " / ".join(en_parts)
+
+
+def indicator_trilingual(zh: str) -> str:
+    """指標名(indicator)を「中文 / 日本語 / English」で返す（部品合成）。"""
+    ja, en = _compose(zh)
+    return f"{zh} / {ja} / {en}"
+
+
+def indicator_ja_en(zh: str) -> tuple[str, str]:
+    """指標名・内訳名の (日本語, English) を返す。対訳グロッサリ用。"""
+    return _compose(zh)
+
+
 def region_trilingual(zh: str) -> str:
     """地区名を「中文 / 日本語 / English」で返す。未登録は中文のみ。"""
     pair = REGION_LABELS.get(zh)

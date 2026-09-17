@@ -160,7 +160,7 @@ def dg_all_excel(df) -> None:
     """master から各レポートの主要指標(内訳kj1が空)を地区×期間で1シートずつ出力。"""
     from openpyxl import Workbook
     from openpyxl.utils import get_column_letter
-    from .labels import region_trilingual, report_trilingual
+    from .labels import region_trilingual, report_trilingual, indicator_trilingual, indicator_ja_en
     out = OUTPUT_DIR / "china_dg_all.xlsx"
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     wb = Workbook()
@@ -170,6 +170,7 @@ def dg_all_excel(df) -> None:
     ws0["A2"] = "各シート＝1レポート。主要指標を 地区(行)×期間(列) の値で表示。"
     ws0["A3"] = "全データ(全指標・公式/計算前年比・乖離)は output/dg_master.csv.gz を参照。"
     ws0["A4"] = "レポート名・地区名は 中文 / 日本語 / English で併記。"
+    ws0["A5"] = "指標名・内訳名の対訳は末尾の『指標対訳』『内訳対訳』シートを参照（部品辞書で自動合成）。"
     used = set()
     for report, sub in df.groupby("report"):
         # 主要指標 = i_name と一致し内訳(kj1)が無い指標。無ければ最頻indicator
@@ -192,7 +193,7 @@ def dg_all_excel(df) -> None:
         used.add(name)
         ws = wb.create_sheet(name)
         # タイトルは レポート名を 中文/日本語/English 併記（指標名は中文のまま付記）
-        ws.cell(1, 1, f"{report_trilingual(str(report))}  ［{ind}］")
+        ws.cell(1, 1, f"{report_trilingual(str(report))}  ［{indicator_trilingual(str(ind))}］")
         periods = sorted(s["period"].unique())
         regions = list(dict.fromkeys(s.sort_values("region_code")["region_name"]))
         ws.cell(3, 1, "地区/地域/Region \\ 期間/Period")
@@ -211,8 +212,29 @@ def dg_all_excel(df) -> None:
                 ws.cell(rr, cc, float(r.level)).number_format = "#,##0.0"
         ws.freeze_panes = "B4"
         ws.column_dimensions["A"].width = 34
+    # 対訳グロッサリ（全 indicator / kj1 を 中文・日本語・English で列挙）
+    def _glossary(sheet_title: str, values) -> None:
+        gws = wb.create_sheet(sheet_title)
+        gws.cell(1, 1, "中文"); gws.cell(1, 2, "日本語"); gws.cell(1, 3, "English")
+        for c in (1, 2, 3):
+            gws.cell(1, c).font = gws.cell(1, c).font.copy(bold=True)
+        for i, zh in enumerate(sorted({str(v) for v in values if str(v) not in ("", "nan")})):
+            ja, en = indicator_ja_en(zh)
+            gws.cell(2 + i, 1, zh); gws.cell(2 + i, 2, ja); gws.cell(2 + i, 3, en)
+        gws.freeze_panes = "A2"
+        gws.column_dimensions["A"].width = 46
+        gws.column_dimensions["B"].width = 40
+        gws.column_dimensions["C"].width = 52
+    try:
+        _glossary("指標対訳", df["indicator"].dropna().unique())
+        if "kj1" in df.columns:
+            kj = [v for v in df["kj1"].dropna().unique() if str(v).strip()]
+            if kj:
+                _glossary("内訳対訳", kj)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("対訳グロッサリ生成に失敗: %s", exc)
     wb.save(out)
-    logger.info("要約Excel: %s（%dシート）", out, len(used))
+    logger.info("要約Excel: %s（%dシート）", out, len(wb.sheetnames))
 
 
 def cmd_discover(args: argparse.Namespace) -> int:
