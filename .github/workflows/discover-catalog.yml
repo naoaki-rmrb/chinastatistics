@@ -1,0 +1,34 @@
+name: カタログ探索 (Discover catalog - find housing-price reports)
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: china-stats-dg-all
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/china-economic-indicators-7exy6v
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - name: カタログ全走査
+        run: python scripts/discover_catalog.py
+      - name: コミット
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add output/catalog_all.json || true
+          git commit -m "chore: カタログ探索ダンプ" || echo "no changes"
+          git push origin HEAD:claude/china-economic-indicators-7exy6v || true
