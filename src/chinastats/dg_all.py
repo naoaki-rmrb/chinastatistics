@@ -141,7 +141,11 @@ def _pivot(df_raw: pd.DataFrame) -> pd.DataFrame:
     df = df_raw.copy()
     df["v"] = pd.to_numeric(df["v"], errors="coerce")
     df["is_yoy"] = df["dp"].isin(DP_YOY)
-    df["is_level"] = df["dp"].isin(DP_LEVEL) & (df["unit"] != "%")
+    # 通常は「単位=%」の本期は level 扱いしない（=乖離検証用の実額のみ）。
+    # ただし価格指数(指標名に『指数』)は値そのものが指数(100基準)で単位=%のため、
+    # これを level として取り込む（例: 70城住宅販売価格指数の 上月=100/上年同月=100）。
+    is_index = df["indicator"].astype(str).str.contains("指数", na=False)
+    df["is_level"] = df["dp"].isin(DP_LEVEL) & ((df["unit"] != "%") | is_index)
     # 内訳(kj1)・指標正式名(i_name)は欠損があり得るので埋めてキーに含める。
     # ※ kj1 をキーに含めないと、同一 indicator の国別・品目別など内訳系列が
     #   1本に潰れて値が混ざる（agg(first)）。必ず区別する。
